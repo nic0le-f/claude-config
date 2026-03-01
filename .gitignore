@@ -8,6 +8,8 @@ debug/
 backups/
 todos/
 plans/
+tasks/
+file-history/
 
 # Per-session project data (conversation histories)
 projects/
