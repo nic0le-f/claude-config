@@ -9,6 +9,15 @@
             "command": "/Users/nicole/.claude/hooks/guard-main.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/hooks/guard-bash.sh"
+          }
+        ]
       }
     ],
     "Stop": [
