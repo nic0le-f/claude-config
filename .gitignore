@@ -1,0 +1,22 @@
+# Runtime and session state
+history.jsonl
+mcp-needs-auth-cache.json
+session-env/
+shell-snapshots/
+cache/
+debug/
+backups/
+todos/
+plans/
+
+# Per-session project data (conversation histories)
+projects/
+
+# Local settings overrides (may contain tokens/secrets)
+settings.local.json
+
+# Nested .claude dirs from subprojects
+.claude/
+
+# Plugin marketplace data (has its own git history)
+plugins/marketplaces/
