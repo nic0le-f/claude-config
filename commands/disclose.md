@@ -1,12 +1,68 @@
 # Prepare Disclosure
 
-Generate materials for responsible disclosure to a vendor.
+Generate materials for responsible vulnerability disclosure.
 
 ## Instructions
 
-Create a professional disclosure report for sending to the vendor:
+Based on the argument or conversation context, produce one or both outputs below.
 
-## Initial Disclosure Email Template
+---
+
+## Output 1: Security Advisory
+
+A full technical advisory document for public or coordinated release.
+
+```
+# Security Advisory: [TITLE]
+
+## Overview
+- **CVE ID**: [CVE-YYYY-XXXXX or "Pending"]
+- **Vendor**: [Vendor Name]
+- **Product**: [Product Name]
+- **Affected Versions**: [Version range]
+- **Fixed Version**: [Version or "Not yet patched"]
+- **Severity**: [Critical/High/Medium/Low] (CVSS: X.X)
+- **Discovered by**: [Researcher name]
+- **Disclosure Date**: [Date]
+
+## Summary
+[One paragraph description of the vulnerability]
+
+## Technical Details
+[Detailed technical explanation including:]
+- Root cause analysis
+- Affected component/function
+- Attack vector
+- Code snippets or pseudocode showing the issue
+
+## Impact
+[What an attacker can achieve by exploiting this vulnerability]
+
+## Proof of Concept
+[Steps to reproduce - non-weaponized]
+
+## Remediation
+[How to fix the vulnerability]
+
+## Workarounds
+[Temporary mitigations if patch not available]
+
+## Timeline
+- [Date]: Vulnerability discovered
+- [Date]: Vendor notified
+- [Date]: Vendor acknowledged
+- [Date]: Patch released
+- [Date]: Public disclosure
+
+## References
+- [Relevant links]
+```
+
+---
+
+## Output 2: Vendor Notification Email
+
+An initial disclosure email for sending to the vendor's security team.
 
 ```
 Subject: Security Vulnerability in [Product Name] - Responsible Disclosure
@@ -45,7 +101,9 @@ Best regards,
 [Your Name]
 ```
 
-## Checklist Before Sending
+---
+
+## Pre-Disclosure Checklist
 - [ ] Verified vulnerability is reproducible
 - [ ] Confirmed affected versions
 - [ ] Checked for existing CVE

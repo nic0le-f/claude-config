@@ -22,3 +22,9 @@ settings.local.json
 
 # Plugin marketplace data (has its own git history)
 plugins/marketplaces/
+
+# Telemetry, statsig, and paste cache
+telemetry/
+statsig/
+paste-cache/
+state/

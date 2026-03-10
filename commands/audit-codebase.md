@@ -25,9 +25,11 @@ Search for dangerous patterns based on language:
 
 **C/C++:**
 - `strcpy|strcat|sprintf|gets|scanf` - buffer overflows
-- `malloc|realloc|free` - memory management issues
+- `malloc|realloc|free` - unchecked return values, double-free, use-after-free
 - `system|popen|exec` - command injection
 - `%s|%n` in printf-family - format strings
+- Integer overflow leading to small allocations
+- Off-by-one errors in loops
 
 **Python:**
 - `eval|exec|compile` - code injection
@@ -54,11 +56,21 @@ Search for dangerous patterns based on language:
 - FFI boundaries
 - `.unwrap()` on untrusted input
 
-### Phase 3: Data Flow Analysis
+**Crypto Weaknesses (all languages):**
+- Weak algorithms (MD5, SHA1 for security, DES, RC4)
+- Hardcoded keys/IVs
+- Predictable random number generation
+- ECB mode usage
+
+### Phase 3: Logic & Data Flow Analysis
 1. Trace user input from entry points to sensitive operations
 2. Identify missing or insufficient validation
 3. Check for proper encoding/escaping at output boundaries
 4. Look for trust boundary violations
+5. Authentication bypass possibilities
+6. Authorization check gaps (missing or inconsistent access controls)
+7. TOCTOU race conditions
+8. Improper error handling exposing sensitive information
 
 ### Phase 4: Configuration & Secrets
 - Hardcoded credentials or API keys
