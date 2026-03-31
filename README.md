@@ -2,28 +2,16 @@
 
 Personal Claude Code configuration for security research. Optimized for low overhead on day-to-day analysis work, with structured git discipline for tool development.
 
-## Operating Modes
-
-### Research Mode (default)
-Direct execution, no planning overhead. Covers binary analysis, malware triage, vulnerability hunting, quick scripts, and PoCs. Git is optional and informal.
-
-### Project Mode (`/dev`)
-Activated by `/dev` or when building something reusable. Claude presents a bullet plan, waits for confirmation, then scaffolds a git repo with a feature worktree. All code work happens in `.worktrees/<feature-name>/` — never directly on `main`.
-
 ## Skills
 
 | Command | Description |
 |---------|-------------|
-| `/dev` | Initialize a git-structured project with worktree |
-| `/plan` | Expand in-conversation bullets to a persistent `PLAN.md` |
 | `/research` | Append a structured findings entry to `research.md` |
-| `/poc` | Generate a proof of concept |
-| `/find-vulns` | Vulnerability hunting workflow |
-| `/analyze-binary` | Binary analysis workflow |
 | `/malware-analyst` | Malware reverse engineering session |
-| `/cvss` | Calculate CVSS score |
-| `/write-advisory` | Draft a vulnerability advisory |
+| `/audit-codebase` | Security audit of a source folder |
 | `/disclose` | Prepare responsible disclosure |
+
+Planning uses native plan mode. Code work uses native worktrees (`EnterWorktree`).
 
 ## Hooks
 
@@ -37,18 +25,9 @@ All hooks are soft blocks (exit 1) — Claude sees the warning and must resolve 
 
 ## Git Workflow
 
-```
-main
-├── PLAN.md          (if /plan was used)
-├── research.md      (if /research was used)
-└── .worktrees/      (gitignored)
-    └── <feature>/   (all active code work)
-```
-
-- `main` is protected from code writes after the initial scaffold
-- Feature work lives in `.worktrees/<name>/` on branch `<name>`
+- Code changes always go through worktrees (native `EnterWorktree`), never directly on `main`
+- `guard-main.sh` enforces this as a safety net
 - Commits use conventional prefixes: `feat:`, `fix:`, `add:`, `chore:`, `docs:`
-- Merge to `main` when a feature is complete, then remove the worktree
 - `git push` always requires manual approval
 
 ## What's Gitignored

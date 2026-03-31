@@ -45,6 +45,6 @@ Maintain a `research.md` file in the current working directory. Each invocation 
 
 - Keep findings factual and specific: offsets, function names, hashes, behaviors.
 - `research.md` is informal — bullet points and fragments are fine.
-- In a project repo, `research.md` lives alongside `PLAN.md` in the repo root.
+- In a project repo, `research.md` lives in the repo root.
 - In an ad-hoc directory (no git), it's just a local scratch file.
 - If there is a git repo and the file is new or has meaningful changes, offer to commit it.
