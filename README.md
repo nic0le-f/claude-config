@@ -6,8 +6,7 @@ Personal Claude Code configuration for security research. Optimized for low over
 
 | Command | Description |
 |---------|-------------|
-| `/research` | Append a structured findings entry to `research.md` |
-| `/malware-analyst` | Malware reverse engineering session |
+| `/malware-analyst` | Malware RE session (Binary Ninja MCP, YARA, reporting conventions) |
 | `/audit-codebase` | Security audit of a source folder |
 | `/disclose` | Prepare responsible disclosure |
 
