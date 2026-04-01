@@ -2,11 +2,25 @@
 
 Personal Claude Code configuration for security research. Optimized for low overhead on day-to-day analysis work, with structured git discipline for tool development.
 
+## Agents
+
+Defined in `agents/`. Visible via `/agents` dialog.
+
+| Agent | Model | Description |
+|-------|-------|-------------|
+| `re-agent` | opus | Autonomous RE pipeline — 8-phase analysis from intake to report. Spawns subagents, writes structured reports, tracks progress across sessions via project memory. `acceptEdits` permission mode, 100 turn cap. |
+| `binninja-agent` | opus | Binary Ninja MCP specialist — triage, decompile, rename, retype, xrefs. Follows `mw_` naming and confidence conventions. |
+| `script-analyzer` | opus | Malicious script analysis — deobfuscation, call graphs, IOC extraction. Supports PS, Python, JS, VBA, shell. |
+| `enrichment-agent` | sonnet | Threat intel enrichment — VirusTotal, MalwareBazaar, Shodan lookups. |
+| `msdn-qa` | sonnet | Validates Windows API calls in analysis reports against MSDN documentation. |
+
+`re-agent` is the main entry point for full-pipeline analysis. It orchestrates the other 4 as subagents.
+
 ## Skills
 
 | Command | Description |
 |---------|-------------|
-| `/malware-analyst` | Malware RE session (Binary Ninja MCP, YARA, reporting conventions) |
+| `/malware-analyst` | Malware RE conventions (Binary Ninja MCP, naming, confidence, YARA, reporting). Used standalone for quick focused binary work, or referenced by `re-agent` for its standards. |
 | `/audit-codebase` | Security audit of a source folder |
 | `/disclose` | Prepare responsible disclosure |
 
