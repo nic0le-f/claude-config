@@ -1,4 +1,71 @@
 {
   "model": "opus[1m]",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/hooks/guard-main.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/hooks/guard-bash.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/hooks/agent-verbosity-check.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/monitor/hooks/agent-watchdog.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/monitor/hooks/loop-detect.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/hooks/compact-remind.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/hooks/uncommitted-remind.sh"
+          },
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Waiting for input\" with title \"Claude Code\" sound name \"Glass\"'"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /Users/nicole/.claude/statusline-command.sh"
+  },
   "skipDangerousModePermissionPrompt": true
 }
