@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code status line script
 # Receives JSON via stdin with session/model/context data
+# Mirrors p10k prompt elements: dir + vcs + model + context
 
 input=$(cat)
 
@@ -15,13 +16,28 @@ cwd="${cwd/#$HOME/\~}"
 
 # ANSI color codes (dimmed-friendly)
 RESET='\033[0m'
-BOLD='\033[1m'
 DIM='\033[2m'
 CYAN='\033[36m'
 YELLOW='\033[33m'
 GREEN='\033[32m'
 RED='\033[31m'
+BLUE='\033[34m'
 MAGENTA='\033[35m'
+
+# Git branch/status (mirrors p10k vcs segment)
+git_part=""
+if git_dir=$(git -C "$cwd" rev-parse --git-dir --no-optional-locks 2>/dev/null | head -1); then
+    branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null || git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
+    if [ -n "$branch" ]; then
+        # Check for dirty state
+        if git -C "$cwd" diff --quiet --no-optional-locks 2>/dev/null && \
+           git -C "$cwd" diff --cached --quiet --no-optional-locks 2>/dev/null; then
+            git_part=" $(printf "${GREEN}${branch}${RESET}")"
+        else
+            git_part=" $(printf "${YELLOW}${branch}*${RESET}")"
+        fi
+    fi
+fi
 
 # Build context usage indicator
 ctx_part=""
@@ -47,8 +63,9 @@ if [ -n "$vim_mode" ]; then
     fi
 fi
 
-printf "${DIM}${CYAN}%s${RESET} ${DIM}%s${RESET}%s%s" \
+printf "${DIM}${CYAN}%s${RESET}%s ${DIM}%s${RESET}%s%s" \
     "$cwd" \
+    "$git_part" \
     "$model" \
     "$ctx_part" \
     "$vim_part"
