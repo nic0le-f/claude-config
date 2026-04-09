@@ -1,6 +1,6 @@
 ---
-name: triage
-description: Triage a security alert — validate Intezer's automated classification, suggest fixes (jq filter, AI agent instructions, or bug report), and optionally investigate deeper via triage-agent.
+name: intezer-triage
+description: Triage a security alert — validate Intezer's automated classification, suggest fixes (jq filter, AI agent instructions, or bug report), and optionally investigate deeper via intezer-triage-agent.
 argument-hint: [alert-file.json]
 allowed-tools: Read Grep Glob Bash Agent
 ---
@@ -54,7 +54,7 @@ If `triage_result` is not present in the alert JSON, note this and assess based 
 Render one of three assessments:
 - **AGREE** — triage looks correct, evidence supports the classification
 - **DISAGREE** — triage appears wrong, with specific reasoning about what's inconsistent
-- **INSUFFICIENT** — not enough data in the alert to validate; offer to spawn `triage-agent` for deeper investigation
+- **INSUFFICIENT** — not enough data in the alert to validate; offer to spawn `intezer-triage-agent` for deeper investigation
 
 ### Step 3 — Discuss and produce fix
 
@@ -63,7 +63,7 @@ If **AGREE**: present the structured verdict and stop.
 If **DISAGREE**: discuss with the user what type of fix is most appropriate:
 
 **Fix type A — jq filter + reclassification:**
-When the issue is a class of alerts being misclassified and needs a rule to catch them. Generate a `select(...)` jq query (following the same conventions as the `/alert-jq` skill) plus the correct classification.
+When the issue is a class of alerts being misclassified and needs a rule to catch them. Generate a `select(...)` jq query (following the same conventions as the `/intezer-alert-jq` skill) plus the correct classification.
 
 **Fix type B — AI agent instructions:**
 When the issue is the Intezer investigation agent's behavior — wrong reasoning, ignoring evidence, vendor bias. Suggest specific prompt or rule changes for the agent's `SYSTEM_GUIDELINES`.
@@ -71,13 +71,13 @@ When the issue is the Intezer investigation agent's behavior — wrong reasoning
 **Fix type C — Bug report:**
 When the issue is a system problem — broken enrichment queries, missing data sources, parameter type mismatches, tool plumbing failures. Write a structured bug description for engineering.
 
-If **INSUFFICIENT**: ask the user whether to spawn `triage-agent` for deeper investigation. The agent can:
+If **INSUFFICIENT**: ask the user whether to spawn `intezer-triage-agent` for deeper investigation. The agent can:
 - Fetch full alert + investigation messages from Intezer API
 - Enrich network artifacts via VT/Shodan
 - Web search for context on detection rules or domains
 - Cross-reference similar alerts
 
-Spawn it with: `Agent(subagent_type="triage-agent", prompt="Investigate alert: <alert_id>, tenant: <tenant_id>. Fetch investigation messages and enrich IOCs. <specific questions>")`
+Spawn it with: `Agent(subagent_type="intezer-triage-agent", prompt="Investigate alert: <alert_id>, tenant: <tenant_id>. Fetch investigation messages and enrich IOCs. <specific questions>")`
 
 ### Step 4 — Output
 

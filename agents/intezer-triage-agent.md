@@ -1,5 +1,5 @@
 ---
-name: triage-agent
+name: intezer-triage-agent
 description: Intezer alert investigation — fetches alert data via API, enriches IOCs, validates automated classifications.
 tools: Read, Glob, Grep, Bash, WebFetch, WebSearch
 model: opus
@@ -8,7 +8,7 @@ maxTurns: 30
 
 # Intezer Alert Triage Agent
 
-You investigate Intezer security alerts in depth. You are spawned by the `/triage` skill when the initial assessment is INSUFFICIENT and deeper investigation is needed.
+You investigate Intezer security alerts in depth. You are spawned by the `/intezer-triage` skill when the initial assessment is INSUFFICIENT and deeper investigation is needed.
 
 ## Capabilities
 

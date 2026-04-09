@@ -1,5 +1,5 @@
 ---
-name: alert-jq
+name: intezer-alert-jq
 description: Generate a jq query to classify and filter security alerts based on user-provided criteria. Use when the user wants to build jq filters for alert JSON objects.
 argument-hint: [alert-file.json]
 allowed-tools: Read Grep Glob Bash
