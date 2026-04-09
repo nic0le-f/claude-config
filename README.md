@@ -13,6 +13,7 @@ Defined in `agents/`. Visible via `/agents` dialog.
 | `script-analyzer` | opus | Malicious script analysis — deobfuscation, call graphs, IOC extraction. Supports PS, Python, JS, VBA, shell. |
 | `enrichment-agent` | sonnet | Threat intel enrichment — VirusTotal, MalwareBazaar, Shodan lookups. |
 | `msdn-qa` | sonnet | Validates Windows API calls in analysis reports against MSDN documentation. |
+| `triage-agent` | opus | Intezer alert investigation — fetches alert data via API, enriches IOCs (VT/Shodan), validates automated classifications. Spawned by `/triage` for deep investigation. |
 
 `re-agent` is the main entry point for full-pipeline analysis. It orchestrates the other 4 as subagents.
 
@@ -23,6 +24,8 @@ Defined in `agents/`. Visible via `/agents` dialog.
 | `/malware-analyst` | Malware RE conventions (Binary Ninja MCP, naming, confidence, YARA, reporting). Used standalone for quick focused binary work, or referenced by `re-agent` for its standards. |
 | `/audit-codebase` | Security audit of a source folder |
 | `/disclose` | Prepare responsible disclosure |
+| `/triage` | Intezer alert triage — validate automated classification, suggest fixes (jq filter, agent instructions, or bug report). Spawns `triage-agent` for deep investigation. |
+| `/alert-jq` | Generate jq `select(...)` queries to classify/filter Intezer alert JSON objects from natural-language criteria. |
 
 Planning uses native plan mode. Code work uses native worktrees (`EnterWorktree`).
 
