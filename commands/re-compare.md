@@ -7,7 +7,9 @@ You are running a **multi-sample comparative analysis**. Your job is to identify
 
 ---
 
-## Step 0 — Load Prior Context
+## Step 0 — Load Prior Context and Script Inventory
+
+Check `__scripts__/` and `~/.claude/scripts/` for existing tools before creating anything new.
 
 For each sample in the list:
 1. Find its `phases/` directory. Read all `phases/*.md` files.
@@ -91,7 +93,7 @@ Samples: <list>
 <LOW confidence items, samples missing triage, suggested next dives>
 ```
 
-Append a one-line summary to `FINDINGS.md` under a `## Comparative` section.
+Append confirmed comparative facts to `FINDINGS.md` under `## Comparative` (ledger format — one line per confirmed cross-sample finding, HIGH/MEDIUM confidence only).
 
 ---
 

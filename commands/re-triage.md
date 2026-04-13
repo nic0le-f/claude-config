@@ -6,9 +6,11 @@ You are running a **cold triage** on a malware sample. Your job is Phases 0–2 
 
 ---
 
-## Step 0 — Resume Check
+## Step 0 — Resume Check and Script Inventory
 
-Before doing anything, check for an existing `phases/` directory next to the sample.
+Before doing anything:
+1. Check `__scripts__/` in the project directory and `~/.claude/scripts/`. Note what tools already exist — use them rather than rewriting.
+2. Check for an existing `phases/` directory next to the sample.
 
 - If `phases/phase2_triage.md` exists: read it, then tell the analyst:
   > "Prior triage found (date from file). Re-run, or skip to `/re-dive` or `/re-compare`?"
@@ -75,6 +77,8 @@ Spawn `script-analyzer`:
 - For each extracted artifact: classify and note (do not recurse fully — flag for analyst)
 
 Write triage summary to `phases/phase2_triage.md`. Include: architecture, format, import/export count, capability fingerprint, notable functions or strings, packer/obfuscation assessment.
+
+After writing the phase file, append confirmed facts to `FINDINGS.md` (ledger format — one fact per line, HIGH/MEDIUM confidence only). Typical triage facts: file type, architecture, stripped/not stripped, build ID, import/export count, packer status, enrichment verdict.
 
 ---
 

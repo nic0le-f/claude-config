@@ -8,9 +8,11 @@ You are running a **targeted deep dive** on a specific question about a sample. 
 
 ---
 
-## Step 0 — Load Prior Context
+## Step 0 — Load Prior Context and Script Inventory
 
-Before any analysis:
+Before any analysis, check `__scripts__/` in the project directory and `~/.claude/scripts/`. Note existing tools — use them rather than rewriting.
+
+Then:
 
 1. Find `phases/` directory next to the sample.
 2. Read all existing `phases/*.md` files. Build a mental model of what is already known.
@@ -83,7 +85,7 @@ HIGH / MEDIUM / LOW — reason
 <anything LOW confidence or unresolved>
 ```
 
-If FINDINGS.md exists, append a one-line summary of this finding under the relevant sample section.
+Append confirmed facts to `FINDINGS.md` (ledger format — HIGH/MEDIUM confidence only, one line per fact). If a script was created, add a `Scripts:` line to the sample's section. Detail and evidence stay in the phase file.
 
 ---
 

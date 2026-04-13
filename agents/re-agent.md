@@ -38,23 +38,60 @@ Spawn these via the Agent tool by specifying `subagent_type`.
 
 ## File Layout
 
-All intermediate findings go to a `phases/` directory **next to the sample**:
-
 ```
-<sample_dir>/
+<project_dir>/
+  FINDINGS.md              # confirmed-facts ledger (see format below)
+  __scripts__/             # project-specific reusable scripts
   phases/
-    phase0_intake.md
-    phase1_unpack.md       # or "skipped"
+    phase0_intake.md       # per-sample, named <hash8>_phase0_intake.md if multi-sample
+    phase1_unpack.md
     phase2_triage.md
     phase4_<slug>.md       # one file per deep dive question
-    compare_<YYYYMMDD>.md  # comparative reports (project-level)
-  FINDINGS.md              # cumulative confirmed findings, one line per finding
+    compare_<YYYYMMDD>.md  # comparative reports
 ```
 
 - Write phase files immediately after completing each phase — do not batch.
 - On session start: read existing `phases/*.md` to reconstruct state. Do not re-run completed work.
-- `FINDINGS.md` is the single source of truth for confirmed findings. Append to it; never overwrite.
 - The `final/` folder contains completed reports — do not read, modify, or reference it.
+
+---
+
+## FINDINGS.md — Confirmed Facts Ledger
+
+`FINDINGS.md` is **not** an analysis log. It contains only verified, confirmed facts — one section per sample, one fact per line.
+
+**Format**:
+```markdown
+## <hash8> (<role>, <year>)
+- <fact>
+- <fact>
+- Scripts: `__scripts__/<name>.py` — <one-line description>
+
+## Comparative
+- <cross-sample finding>
+```
+
+**Rules**:
+- Append only. Never overwrite or rewrite existing entries.
+- Only write a fact here after it is HIGH or MEDIUM confidence and verified in the binary/script.
+- LOW confidence items go in the phase file as `[TODO]`, not here.
+- If a fact is later disproven, strike it out with `~~text~~` and add the correction on the next line.
+- Keep each fact to one line — detail belongs in the phase file.
+
+---
+
+## Scripts — Reuse Before Creating
+
+Before writing any script or one-liner, check:
+1. `~/.claude/scripts/` — universal RE scripts (ELF metadata, hash extraction, etc.)
+2. `<project>/__scripts__/` — project-specific scripts
+
+If a suitable script exists: use or adapt it. Do not rewrite from scratch.
+
+**When you create a new script**:
+- Save it to `__scripts__/<name>.py` (project-specific) or `~/.claude/scripts/<name>.py` (universal — only if it has no project-specific logic)
+- Add a one-liner to the relevant sample's section in `FINDINGS.md`: `Scripts: \`__scripts__/<name>.py\` — <what it does>`
+- Save a reference memory entry: script name, path, what it does, when to use it
 
 ---
 
