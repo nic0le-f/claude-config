@@ -40,6 +40,10 @@
           {
             "type": "command",
             "command": "/Users/nicole/.claude/monitor/hooks/loop-detect.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/monitor/hooks/context_budget.py"
           }
         ]
       }
@@ -47,6 +51,10 @@
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nicole/.claude/monitor/hooks/session_summary.py"
+          },
           {
             "type": "command",
             "command": "/Users/nicole/.claude/hooks/compact-remind.sh"
@@ -67,5 +75,6 @@
     "type": "command",
     "command": "bash /Users/nicole/.claude/statusline-command.sh"
   },
+  "effortLevel": "high",
   "skipDangerousModePermissionPrompt": true
 }
