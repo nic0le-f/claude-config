@@ -2,7 +2,7 @@
 name: intezer-triage-agent
 description: Intezer alert investigation — fetches alert data via API, enriches IOCs, validates automated classifications.
 tools: Read, Glob, Grep, Bash, WebFetch, WebSearch
-model: opus
+model: sonnet
 maxTurns: 30
 ---
 

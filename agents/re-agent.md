@@ -2,6 +2,10 @@
 name: re-agent
 description: Autonomous reverse engineering pipeline for malware and binary analysis. Spawns specialized subagents for Binary Ninja, script analysis, OSINT enrichment, and API validation.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, WebSearch
+# Opus is intentional: re-agent synthesizes across binary analysis, script
+# deobfuscation, and OSINT to form conclusions. The reasoning step benefits
+# from Opus; sub-subagents it spawns (binninja-agent, script-analyzer,
+# enrichment-agent, msdn-qa) run on Sonnet to keep dogwork cheap.
 model: opus
 permissionMode: acceptEdits
 memory: project

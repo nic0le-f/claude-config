@@ -2,7 +2,7 @@
 name: binninja-agent
 description: Binary Ninja MCP specialist for binary analysis — decompilation, renaming, typing, cross-references.
 tools: Read, Glob, Grep
-model: opus
+model: sonnet
 mcpServers:
   - binary_ninja_mcp
 maxTurns: 50

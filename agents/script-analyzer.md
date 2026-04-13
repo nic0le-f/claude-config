@@ -2,7 +2,7 @@
 name: script-analyzer
 description: Analyzes malicious scripts (PowerShell, Python, JavaScript, VBA, shell) — deobfuscation, call graphs, IOC extraction.
 tools: Read, Glob, Grep, Bash
-model: opus
+model: sonnet
 maxTurns: 50
 ---
 
