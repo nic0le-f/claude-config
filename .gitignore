@@ -22,6 +22,10 @@ settings.local.json
 
 # Plugin marketplace data (has its own git history)
 plugins/marketplaces/
+plugins/blocklist.json
+
+# Runtime settings overrides (model, effort level, etc.)
+settings.json
 
 # Telemetry, statsig, and paste cache
 telemetry/
