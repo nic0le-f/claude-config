@@ -1,3 +1,3 @@
 [submodule "monitor"]
 	path = monitor
-	url = git@github.com-nikol:nic0le-f/claude-code-monitor.git
+	url = https://github.com/nic0le-f/claude-code-monitoring
