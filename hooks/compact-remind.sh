@@ -4,7 +4,7 @@
 # Fires on Stop event. Tracks turns per session_id, warns at THRESHOLD
 # and every INTERVAL turns after. Session files auto-expire after 24h.
 
-THRESHOLD=25
+THRESHOLD=15
 INTERVAL=5
 STATE_DIR="$HOME/.claude/state/sessions"
 mkdir -p "$STATE_DIR"

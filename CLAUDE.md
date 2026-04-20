@@ -10,3 +10,7 @@ Precise: hex as `0x…`, offsets, register states, CWE IDs, CVSS where relevant.
 
 ## Token Hygiene
 - Targeted reads only; file:line refs not full blocks
+
+## Session Hygiene
+- Run `/compact` when compact-remind fires — don't defer it.
+- At session end, save anything non-obvious to memory: decisions, preferences, project context that won't be obvious from reading the code.
