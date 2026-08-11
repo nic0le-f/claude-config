@@ -69,6 +69,13 @@ claude
 | `guard-bash.sh` | `PreToolUse` (Bash) | Soft-warns on destructive commands: `rm -rf`, `git push --force`, `git reset --hard`, `git clean -f`, `git branch -D`, `dd`, `mkfs`. |
 | `uncommitted-remind.sh` | `Stop` | Advisory reminder if there are uncommitted changes at session end. |
 
+Git hooks live in `git-hooks/`, wired in globally via `core.hooksPath`:
+
+| Hook | Behavior |
+|------|----------|
+| `commit-msg` | Strips Claude/Anthropic attribution trailers from every commit message. |
+| `pre-commit` | Hard-blocks commits staging runtime/secret paths, secret-shaped strings, employer material, or a work email as author. **Scoped to `~/.claude` only** — inert in every other repo, since a global `core.hooksPath` fires everywhere. Override with `--no-verify`. |
+
 All hooks are soft blocks (exit 1) — Claude sees the warning and must resolve it, but there's no hard system lockout.
 
 ## Backlog

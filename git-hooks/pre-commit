@@ -1,0 +1,107 @@
+#!/bin/bash
+# pre-commit - Keep work material, secrets, and work identity out of ~/.claude.
+#
+# ~/.claude is simultaneously a live config directory and a PUBLIC git repo, so
+# anything a session drops in here is one `git add -A` away from being published.
+# This hook is the gate. It refuses the commit and explains why.
+#
+# Wired in globally via:  git config --global core.hooksPath ~/.claude/git-hooks
+#
+# SCOPED DELIBERATELY: a global core.hooksPath fires in EVERY repo on the machine,
+# and blocking the word "intezer" inside actual Intezer repos would be unusable.
+# So this exits 0 immediately unless the repo root is ~/.claude.
+#
+# Chains to a repo-local pre-commit hook first (if present), same as commit-msg,
+# so per-repo validation is not silently disabled.
+#
+# Override for a deliberate exception:  git commit --no-verify
+
+set -euo pipefail
+
+# 0. Scope check — bail out silently in every repo except ~/.claude.
+TOPLEVEL="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+GUARDED="${HOME}/.claude"
+[ -n "$TOPLEVEL" ] || exit 0
+[ -d "$GUARDED" ] || exit 0
+[ "$TOPLEVEL" -ef "$GUARDED" ] || exit 0
+
+# 1. Chain to a repo-local pre-commit hook, if one exists and isn't us.
+LOCAL_HOOK="$(git rev-parse --git-path hooks/pre-commit 2>/dev/null || true)"
+if [ -n "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ] && [ "$LOCAL_HOOK" -ef "$0" ]; then
+  : # same file via symlink/path collision — skip to avoid recursion
+elif [ -n "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ]; then
+  "$LOCAL_HOOK" "$@"
+fi
+
+STAGED="$(git diff --cached --name-only --diff-filter=ACM || true)"
+[ -n "$STAGED" ] || exit 0
+
+FAILED=0
+fail() {
+  if [ "$FAILED" -eq 0 ]; then
+    printf '\n\033[1;31mpre-commit: refusing to commit — this repo is public.\033[0m\n\n' >&2
+    FAILED=1
+  fi
+  printf '  %s\n' "$1" >&2
+}
+
+# Paths exempt from CONTENT scanning (checks 3 and 4) — not from the path blocklist.
+#   technical-blog-writing/ legitimately names the employer: it describes published posts.
+#   this hook itself contains the very patterns it greps for.
+CONTENT_ALLOWLIST='^(skills/technical-blog-writing/|git-hooks/pre-commit$)'
+
+# 2. Runtime state and secrets that must never be tracked, even via `git add -f`.
+#    .gitignore already covers these; this is the backstop for -f and for renames
+#    into paths a future .gitignore does not anticipate.
+BLOCKED_PATHS='^(\.credentials\.json|settings\.json|settings\.local\.json|history\.jsonl|policy-limits\.json|mcp-needs-auth-cache\.json|remote-settings\.json|\.last-update-result\.json|stats-cache\.json|(projects|sessions|session-env|shell-snapshots|paste-cache|statsig|telemetry|state|backups|debug|file-history|todos|tasks|plans|cache|ide)/|plugins/(installed_plugins|known_marketplaces|blocklist|plugin-catalog-cache)\.json|plugins/(marketplaces|cache)/)'
+
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  if printf '%s' "$f" | grep -qE "$BLOCKED_PATHS"; then
+    fail "runtime/secret path staged: $f"
+  fi
+done <<< "$STAGED"
+
+# 3. Secret-shaped strings in staged content.
+SECRET_RE='gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}'
+
+# 4. Employer material. This is the check that would have caught the original leak.
+KEYWORD_RE='intezer|analyze\.intezer\.com|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  printf '%s' "$f" | grep -qE "$CONTENT_ALLOWLIST" && continue
+
+  CONTENT="$(git show ":$f" 2>/dev/null || true)"
+  [ -n "$CONTENT" ] || continue
+
+  HIT="$(printf '%s' "$CONTENT" | grep -anoEi "$SECRET_RE" | head -3 || true)"
+  if [ -n "$HIT" ]; then
+    while IFS= read -r h; do
+      fail "possible secret in $f:${h%%:*}"
+    done <<< "$HIT"
+  fi
+
+  HIT="$(printf '%s' "$CONTENT" | grep -anoEi "$KEYWORD_RE" | head -3 || true)"
+  if [ -n "$HIT" ]; then
+    while IFS= read -r h; do
+      fail "employer material in $f:${h%%:*} — $(printf '%s' "${h#*:}" | cut -c1-60)"
+    done <<< "$HIT"
+  fi
+done <<< "$STAGED"
+
+# 5. Work identity. `7ea9213` was authored nicole@intezer.com before this existed.
+EMAIL="$(git config user.email 2>/dev/null || true)"
+case "$EMAIL" in
+  *@intezer.com)
+    fail "commit author is $EMAIL — set a personal identity:"
+    fail "    git config user.email '77453264+nic0le-f@users.noreply.github.com'"
+    ;;
+esac
+
+if [ "$FAILED" -ne 0 ]; then
+  printf '\n  Deliberate exception: git commit --no-verify\n\n' >&2
+  exit 1
+fi
+
+exit 0
