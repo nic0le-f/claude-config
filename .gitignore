@@ -1,0 +1,55 @@
+# Runtime and session state
+history.jsonl
+mcp-needs-auth-cache.json
+session-env/
+shell-snapshots/
+cache/
+debug/
+backups/
+todos/
+plans/
+tasks/
+file-history/
+
+# Per-session project data (conversation histories)
+projects/
+
+# Local settings overrides (may contain tokens/secrets)
+settings.local.json
+
+# Nested .claude dirs from subprojects
+.claude/
+
+# Plugin marketplace data (has its own git history)
+plugins/marketplaces/
+plugins/blocklist.json
+plugins/plugin-catalog-cache.json
+
+# Per-machine plugin install state — absolute paths, install timestamps, and
+# internal marketplace URLs. Tracking these kept the tree permanently dirty.
+plugins/installed_plugins.json
+plugins/known_marketplaces.json
+plugins/.last_inuse_sweep
+
+# Runtime state
+remote-settings.json
+.last-update-result.json
+
+# Credentials and secrets
+.credentials.json
+
+# Runtime settings overrides (model, effort level, etc.)
+settings.json
+
+# Telemetry, statsig, and paste cache
+telemetry/
+statsig/
+paste-cache/
+state/
+
+# Runtime data
+sessions/
+ide/
+.last-cleanup
+stats-cache.json
+policy-limits.json

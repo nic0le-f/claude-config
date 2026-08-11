@@ -1,0 +1,42 @@
+#!/bin/bash
+# commit-msg - Strip AI attribution trailers from every commit message.
+#
+# Enforcement layer (belt-and-suspenders) for keeping Claude/Anthropic out of
+# git history. The Claude Code setting `includeCoAuthoredBy: false` stops the
+# tool from adding attribution in the first place; this hook guarantees it for
+# ANY commit (manual, other tools, copy-paste) since it runs on the message
+# itself.
+#
+# Wired in globally via:  git config --global core.hooksPath ~/.claude/git-hooks
+#
+# Because a global core.hooksPath overrides a repo's default .git/hooks, this
+# script chains to a repo-local commit-msg hook first (if present) so existing
+# per-repo validation is not silently disabled. Repos that set their own
+# core.hooksPath (e.g. husky) override this global one entirely and are
+# unaffected.
+
+set -euo pipefail
+
+MSG_FILE="$1"
+
+# 1. Chain to a repo-local commit-msg hook, if one exists and isn't us.
+LOCAL_HOOK="$(git rev-parse --git-path hooks/commit-msg 2>/dev/null || true)"
+if [ -n "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ] && [ "$LOCAL_HOOK" -ef "$0" ]; then
+  : # local hook is this same file via symlink/path collision — skip to avoid recursion
+elif [ -n "$LOCAL_HOOK" ] && [ -x "$LOCAL_HOOK" ]; then
+  "$LOCAL_HOOK" "$@"
+fi
+
+# 2. Strip attribution lines (case-insensitive):
+#    - Co-authored-by: ... Claude / Anthropic / noreply@anthropic.com
+#    - "Generated with Claude Code" footers (with or without the robot emoji)
+CLEANED="$(grep -ivE \
+  -e '^[[:space:]]*Co-authored-by:.*(claude|anthropic)' \
+  -e 'Generated with .*Claude Code' \
+  -e 'Co-Authored-By: Claude' \
+  "$MSG_FILE" || true)"
+
+# 3. Collapse any trailing blank lines left behind.
+printf '%s\n' "$CLEANED" | awk 'NF{p=NR} {l[NR]=$0} END{for(i=1;i<=p;i++) print l[i]}' > "$MSG_FILE"
+
+exit 0
