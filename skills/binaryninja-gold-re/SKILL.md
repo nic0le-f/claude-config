@@ -149,12 +149,12 @@ Author YARA rules — following `/malware-analyst` standards — into `reports/r
 |---|---|---|
 | `function_name` | `0xVA` | `mw_`-prefixed snake_case name |
 | `function_comment` | `0xVA` | comment text |
-| `data_name` | `0xVA` | `mw_`-prefixed snake_case name |
+| `data_name` | `0xVA` | plain snake_case name, no prefix |
 | `source_file` | `0xVA` | recovered source path |
 | `type_definition` | `0xVA` | C struct/union/enum/typedef text |
-| `function_prototype` | `0xVA` | full C signature — `int64_t f(struct mw_cfg* cfg, uint64_t len)` |
-| `variable_type` | `0xVA#current_var_name` | C type text — `struct mw_cfg*` |
-| `variable_name` | `0xVA#current_var_name` | `mw_`-prefixed snake_case name |
+| `function_prototype` | `0xVA` | full C signature — `int64_t f(struct c2_config* cfg, uint64_t len)` |
+| `variable_type` | `0xVA#current_var_name` | C type text — `struct c2_config*` |
+| `variable_name` | `0xVA#current_var_name` | plain snake_case name, no prefix |
 | `data_type` | `0xVA` | C type text |
 
 `target` is always VA hex (`0x17F32A60`), never EA decimal. For a function claim it must be the **function start**, not an address inside the body.
@@ -177,7 +177,11 @@ Two rules the shape check enforces, because both silently corrupted `gold.bndb` 
 
 ## Naming
 
-`snake_case`, every renamed symbol prefixed `mw_`. Categories:
+`snake_case` everywhere. **Only functions carry the `mw_` prefix.**
+
+The prefix answers one question: which functions did the analyst curate, in a binary that may hold thousands of stock ones. That question only applies to the global function namespace. Variables are function-scoped and types are read in context, so they take the plain recovered name — `cfg`, `key_len`, `c2_config`, `command_entry`. Prefixing them only makes decompiled output harder to read, and `validate-claims` rejects an `mw_` prefix on a variable or data name.
+
+Function categories:
 
 | Category | Pattern | Example |
 |---|---|---|
@@ -194,19 +198,29 @@ Two rules the shape check enforces, because both silently corrupted `gold.bndb` 
 | Strings | `mw_str_<action>` | `mw_str_deobfuscate` |
 | Init | `mw_init_<what>` | `mw_init_comms` |
 
-Variables: `mw_buf_<purpose>`, `mw_h_<target>`, `mw_<what>_size` — emitted as `variable_name` claims. Data: `mw_encrypted_strings_blob`, `mw_c2_config_block`.
+Variables (`variable_name` claims), data (`data_name`) and types (`type_definition`) take the plain descriptive name, no prefix:
 
-The `mw_` prefix, snake_case and the no-`_likely` rule are enforced by `validate-claims` for `function_name`, `data_name` and `variable_name`. A convention slip is a shape error, not a validator judgement call.
+| What | Pattern | Example |
+|---|---|---|
+| Buffer | `buf_<purpose>` or the role | `buf_c2_response`, `plaintext` |
+| Handle | `h_<target>` | `h_process`, `h_reg_key` |
+| Size / count | `<what>_len`, `<what>_count` | `key_len`, `entry_count` |
+| Data blob | descriptive | `encrypted_strings_blob`, `c2_config_block` |
+| Type | descriptive | `struct c2_config`, `struct command_entry` |
+
+`validate-claims` enforces snake_case, the no-`_likely` rule and C-identifier validity on all three name kinds; the `mw_` prefix is required on `function_name` and rejected on the others. A convention slip is a shape error, not a validator judgement call.
+
+Because recovered type names carry no prefix, they share a namespace with platform and format types (`Elf64_Header`, `__kernel_long_t`, libc typedefs). Reusing one of those names would silently replace the real definition, so `bn_apply_claims.py` refuses a `type_definition` whose name the database already owns. Pick a distinct name.
 
 ### Recovered upstream names
 
-`mw_` marks actor-authored code. When you recover a function's **genuine** upstream name from the binary's own metadata — a Go `pclntab` entry, a `FuncID`, DWARF, a symbol table — prefixing it would falsely attribute stock runtime or library code to the actor. Declare it instead:
+`mw_` marks an actor-authored function. When you recover a function's **genuine** upstream name from the binary's own metadata — a Go `pclntab` entry, a `FuncID`, DWARF, a symbol table — prefixing it would falsely attribute stock runtime or library code to the actor. Declare it instead:
 
 ```json
 {"claim_id":"fn_437680_name","kind":"function_name","target":"0x437680","proposed_value":"runtime_main","name_source":"recovered","confidence":"high","evidence":["pclntab records func_id 18, which is FuncID_runtime_main in the Go 1.23/1.24 abi.FuncID enum","pclntab attributes 0x437680 to proc.go"],"status":"proposed"}
 ```
 
-`name_source` is `authored` (the default — requires the `mw_` prefix) or `recovered` (must **not** carry the prefix, and the evidence must cite the symbol source). This is the one sanctioned way to name a function without `mw_`; do not use it to smuggle a guessed name past the prefix rule.
+`name_source` is `authored` (the default — requires the `mw_` prefix) or `recovered` (must **not** carry the prefix, and the evidence must cite the symbol source). It applies to `function_name` only, since no other kind is prefixed. This is the one sanctioned way to name a function without `mw_`; do not use it to smuggle a guessed name past the prefix rule.
 
 **No `_likely` suffix.** Uncertainty lives in `claim.status` and the validator's `needs_human` verdict, not in the symbol name. A name is either supported by evidence and applied, or it is not applied.
 

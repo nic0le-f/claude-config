@@ -89,10 +89,43 @@ def sort_type_claims(type_claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 
+def existing_type_names(bv: bn.BinaryView) -> set[str]:
+    """Type names the database already owns before any claim is applied.
+
+    Platform and format types (Elf64_Header, __kernel_long_t, libc typedefs)
+    live in the same namespace as recovered ones. define_user_type replaces a
+    name outright, so a claim that reuses one silently rewrites it — an
+    Elf64_Header claim shrank the real 64-byte struct to 4 bytes in testing.
+    Recovered names carry no prefix to keep them readable, so this is checked
+    rather than avoided by convention.
+    """
+    names = set()
+    user_types = getattr(bv, "user_type_container", None)
+    user_names = set()
+    if user_types is not None:
+        for _tid, entry in user_types.types.items():
+            user_names.add(str(entry[0]))
+    for entry in bv.types:
+        name = str(entry[0]) if isinstance(entry, tuple) else str(entry)
+        if name not in user_names:
+            names.add(name)
+    return names
+
+
 def apply_type_claims(bv: bn.BinaryView, type_claims: list[dict[str, Any]]) -> list[str]:
     if not type_claims:
         return []
     ordered = sort_type_claims(type_claims)
+
+    preexisting = existing_type_names(bv)
+    for claim in ordered:
+        for name in type_defs_in(str(claim["proposed_value"])):
+            if name in preexisting:
+                raise RuntimeError(
+                    f"claim {claim['claim_id']}: type name {name!r} already exists in the "
+                    "database as a platform or format type; applying it would silently "
+                    "replace that definition — pick a distinct name for the recovered type"
+                )
     chunks = []
     for claim in ordered:
         text = str(claim["proposed_value"]).strip()

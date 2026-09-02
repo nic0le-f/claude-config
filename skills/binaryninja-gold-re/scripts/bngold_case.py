@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -28,10 +29,15 @@ VALID_KINDS = {
 }
 VALID_STATUS = {"proposed", "accepted", "rejected", "needs_human"}
 
-# Whether a proposed name is the analyst's own ("authored", requiring the mw_
-# actor prefix) or a genuine upstream symbol name read out of the binary's own
-# metadata ("recovered", which must not carry the prefix).
+# Kinds that propose a symbol name.
+NAME_KINDS = {"function_name", "data_name", "variable_name"}
+
+# Whether a proposed function name is the analyst's own ("authored", requiring
+# the mw_ actor prefix) or a genuine upstream symbol name read out of the
+# binary's own metadata ("recovered", which must not carry the prefix).
 VALID_NAME_SOURCES = {"authored", "recovered"}
+
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 SYMBOL_SOURCE_TOKENS = (
     "pclntab",
     "dwarf",
@@ -237,7 +243,7 @@ def validate_claim(claim: dict[str, Any], index: int) -> list[str]:
 
     # Naming convention is enforced here rather than left to the validator's
     # judgement, so a convention slip never reaches gold.bndb.
-    if kind in ("function_name", "data_name", "variable_name"):
+    if kind in NAME_KINDS:
         name_source = str(claim.get("name_source", "authored"))
         if name_source not in VALID_NAME_SOURCES:
             errors.append(
@@ -247,31 +253,44 @@ def validate_claim(claim: dict[str, Any], index: int) -> list[str]:
         if not value:
             errors.append(f"{prefix}: {kind} needs a non-empty name")
         else:
-            # 'mw_' marks actor-authored code. A name recovered from the
-            # binary's own symbol metadata is upstream ground truth, and
-            # prefixing it would falsely attribute stock code to the actor.
-            if name_source == "authored" and not value.startswith("mw_"):
+            # The 'mw_' prefix exists to answer one question: which functions
+            # did the analyst curate, in a binary that may hold thousands of
+            # stock ones. That question only applies to the global function
+            # namespace, so only function_name carries the prefix. Variables
+            # are function-scoped and types are read in context, and prefixing
+            # them only makes decompiled output harder to read.
+            if kind == "function_name":
+                if name_source == "authored" and not value.startswith("mw_"):
+                    errors.append(
+                        f"{prefix}: a renamed function must be prefixed 'mw_' (got {value!r}); "
+                        "if this is a genuine upstream symbol name, set "
+                        '"name_source":"recovered" and cite the symbol source'
+                    )
+                if name_source == "recovered":
+                    evidence_text = " ".join(str(item).lower() for item in (evidence or []))
+                    if not any(token in evidence_text for token in SYMBOL_SOURCE_TOKENS):
+                        errors.append(
+                            f"{prefix}: name_source 'recovered' needs evidence citing a symbol "
+                            f"source ({', '.join(SYMBOL_SOURCE_TOKENS)})"
+                        )
+                    if value.startswith("mw_"):
+                        errors.append(
+                            f"{prefix}: a recovered upstream name must not carry the 'mw_' "
+                            f"actor prefix (got {value!r})"
+                        )
+            elif value.startswith("mw_"):
                 errors.append(
-                    f"{prefix}: renamed symbol must be prefixed 'mw_' (got {value!r}); "
-                    "if this is a genuine upstream symbol name, set "
-                    '"name_source":"recovered" and cite the symbol source'
+                    f"{prefix}: {kind} takes the plain recovered name without the 'mw_' "
+                    f"prefix (got {value!r}); the prefix is for functions only"
                 )
-            if name_source == "recovered":
-                evidence_text = " ".join(str(item).lower() for item in (evidence or []))
-                if not any(token in evidence_text for token in SYMBOL_SOURCE_TOKENS):
-                    errors.append(
-                        f"{prefix}: name_source 'recovered' needs evidence citing a symbol "
-                        f"source ({', '.join(SYMBOL_SOURCE_TOKENS)})"
-                    )
-                if value.startswith("mw_"):
-                    errors.append(
-                        f"{prefix}: a recovered upstream name must not carry the 'mw_' "
-                        f"actor prefix (got {value!r})"
-                    )
             if value != value.lower():
                 errors.append(f"{prefix}: name must be snake_case (got {value!r})")
             if value.endswith("_likely") or "_likely_" in value:
                 errors.append(f"{prefix}: '_likely' is not allowed in a name; use claim status")
+            if not IDENTIFIER_RE.match(value):
+                errors.append(
+                    f"{prefix}: name must be a valid C identifier (got {value!r})"
+                )
     return errors
 
 
@@ -357,8 +376,6 @@ def cross_claim_errors(
 
 
 def type_names_in(c_code: str) -> set[str]:
-    import re
-
     names = set(re.findall(r"\btypedef\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)\b", c_code))
     names |= set(re.findall(r"\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", c_code))
     names |= set(re.findall(r"\btypedef\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)\b", c_code))
