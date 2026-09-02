@@ -19,8 +19,35 @@ VALID_KINDS = {
     "data_name",
     "type_definition",
     "source_file",
+    # Type application. type_definition only registers a type in the database;
+    # these are the kinds that make a recovered type appear in decompiled output.
+    "function_prototype",
+    "variable_name",
+    "variable_type",
+    "data_type",
 }
 VALID_STATUS = {"proposed", "accepted", "rejected", "needs_human"}
+
+# Whether a proposed name is the analyst's own ("authored", requiring the mw_
+# actor prefix) or a genuine upstream symbol name read out of the binary's own
+# metadata ("recovered", which must not carry the prefix).
+VALID_NAME_SOURCES = {"authored", "recovered"}
+SYMBOL_SOURCE_TOKENS = (
+    "pclntab",
+    "dwarf",
+    "symtab",
+    "symbol table",
+    "func_id",
+    "funcid",
+    "buildinfo",
+    "go:func",
+    "export table",
+)
+
+# Kinds whose target addresses a variable inside a function: "0xVA#var_name".
+VARIABLE_KINDS = {"variable_name", "variable_type"}
+# Kinds whose proposed_value is C type text rather than an identifier.
+TYPE_TEXT_KINDS = {"type_definition", "function_prototype", "variable_type", "data_type"}
 
 DEFAULT_CASES_DIR = os.environ.get("BNGOLD_CASES_DIR", "~/re-cases")
 
@@ -176,7 +203,168 @@ def validate_claim(claim: dict[str, Any], index: int) -> list[str]:
         )
     if claim.get("kind") == "type_definition" and "typedef" not in str(claim.get("proposed_value", "")) and "struct" not in str(claim.get("proposed_value", "")) and "enum" not in str(claim.get("proposed_value", "")):
         errors.append(f"{prefix}: type_definition proposed_value should contain C type text")
+
+    kind = claim.get("kind")
+    target = str(claim.get("target", ""))
+    value = str(claim.get("proposed_value", "")).strip()
+
+    # Target shape. Variable kinds carry "0xVA#var_name"; everything else is a
+    # bare VA. Getting this wrong silently misapplies an edit, so it is fatal.
+    if kind in VARIABLE_KINDS:
+        if "#" not in target:
+            errors.append(
+                f"{prefix}: {kind} target must be '0xVA#current_var_name' (got {target!r})"
+            )
+        else:
+            addr_part, _, var_part = target.partition("#")
+            if not is_va_hex(addr_part):
+                errors.append(f"{prefix}: target address must be VA hex (got {addr_part!r})")
+            if not var_part.strip():
+                errors.append(f"{prefix}: {kind} target is missing the variable name")
+    elif kind in VALID_KINDS and not is_va_hex(target):
+        errors.append(f"{prefix}: target must be VA hex like 0x401000 (got {target!r})")
+
+    if kind in TYPE_TEXT_KINDS and not value:
+        errors.append(f"{prefix}: {kind} needs non-empty C type text")
+
+    # A prototype must actually look like a function signature, otherwise
+    # parse_type_string quietly yields something that is not applied.
+    if kind == "function_prototype" and "(" not in value:
+        errors.append(
+            f"{prefix}: function_prototype proposed_value must be a full C signature "
+            f"with a parameter list (got {value!r})"
+        )
+
+    # Naming convention is enforced here rather than left to the validator's
+    # judgement, so a convention slip never reaches gold.bndb.
+    if kind in ("function_name", "data_name", "variable_name"):
+        name_source = str(claim.get("name_source", "authored"))
+        if name_source not in VALID_NAME_SOURCES:
+            errors.append(
+                f"{prefix}: name_source must be one of {sorted(VALID_NAME_SOURCES)} "
+                f"(got {name_source!r})"
+            )
+        if not value:
+            errors.append(f"{prefix}: {kind} needs a non-empty name")
+        else:
+            # 'mw_' marks actor-authored code. A name recovered from the
+            # binary's own symbol metadata is upstream ground truth, and
+            # prefixing it would falsely attribute stock code to the actor.
+            if name_source == "authored" and not value.startswith("mw_"):
+                errors.append(
+                    f"{prefix}: renamed symbol must be prefixed 'mw_' (got {value!r}); "
+                    "if this is a genuine upstream symbol name, set "
+                    '"name_source":"recovered" and cite the symbol source'
+                )
+            if name_source == "recovered":
+                evidence_text = " ".join(str(item).lower() for item in (evidence or []))
+                if not any(token in evidence_text for token in SYMBOL_SOURCE_TOKENS):
+                    errors.append(
+                        f"{prefix}: name_source 'recovered' needs evidence citing a symbol "
+                        f"source ({', '.join(SYMBOL_SOURCE_TOKENS)})"
+                    )
+                if value.startswith("mw_"):
+                    errors.append(
+                        f"{prefix}: a recovered upstream name must not carry the 'mw_' "
+                        f"actor prefix (got {value!r})"
+                    )
+            if value != value.lower():
+                errors.append(f"{prefix}: name must be snake_case (got {value!r})")
+            if value.endswith("_likely") or "_likely_" in value:
+                errors.append(f"{prefix}: '_likely' is not allowed in a name; use claim status")
     return errors
+
+
+def is_va_hex(text: str) -> bool:
+    text = str(text).strip()
+    if not text.lower().startswith("0x"):
+        return False
+    try:
+        int(text, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def cross_claim_errors(
+    claims: list[dict[str, Any]], verdicts: list[dict[str, Any]] | None = None
+) -> list[str]:
+    """Conflicts that are only visible across claims, not within one claim.
+
+    Each of these produced a silent wrong result in gold.bndb rather than an
+    error, which is why they are checked before the validator ever runs.
+
+    Only claims that could still reach gold.bndb are considered. A claim the
+    validator already rejected cannot conflict with anything, so counting it
+    would report a conflict the analyst has no way to clear.
+    """
+    rejected = {
+        verdict.get("claim_id")
+        for verdict in (verdicts or [])
+        if verdict.get("status") == "rejected"
+    }
+    claims = [claim for claim in claims if claim.get("claim_id") not in rejected]
+    errors = []
+
+    # Two type_definition claims defining the same type name: whichever is
+    # applied last wins and the other is reported applied but discarded.
+    definers: dict[str, list[str]] = {}
+    for claim in claims:
+        if claim.get("kind") != "type_definition":
+            continue
+        for name in type_names_in(str(claim.get("proposed_value", ""))):
+            definers.setdefault(name, []).append(str(claim.get("claim_id")))
+    for name, owners in sorted(definers.items()):
+        if len(owners) > 1:
+            errors.append(
+                f"type name {name!r} is defined by multiple claims ({', '.join(sorted(owners))}); "
+                "last write would silently win — merge them into one claim"
+            )
+
+    # A function_prototype replaces the function's parameter variables, so a
+    # variable claim naming a parameter of that same function is applied
+    # against a variable that no longer exists.
+    proto_funcs = {
+        str(claim.get("target", "")).strip().lower()
+        for claim in claims
+        if claim.get("kind") == "function_prototype"
+    }
+    for claim in claims:
+        if claim.get("kind") not in VARIABLE_KINDS:
+            continue
+        addr_part = str(claim.get("target", "")).partition("#")[0].strip().lower()
+        if addr_part in proto_funcs:
+            errors.append(
+                f"{claim.get('claim_id')}: targets a variable in {addr_part}, which also has a "
+                "function_prototype claim; name the parameter in the prototype instead"
+            )
+
+    # Same variable claimed twice for the same attribute.
+    for kind in sorted(VARIABLE_KINDS):
+        seen: dict[str, str] = {}
+        for claim in claims:
+            if claim.get("kind") != kind:
+                continue
+            key = str(claim.get("target", "")).strip().lower()
+            if key in seen:
+                errors.append(
+                    f"{claim.get('claim_id')}: duplicate {kind} for target {key} "
+                    f"(already claimed by {seen[key]})"
+                )
+            else:
+                seen[key] = str(claim.get("claim_id"))
+    return errors
+
+
+def type_names_in(c_code: str) -> set[str]:
+    import re
+
+    names = set(re.findall(r"\btypedef\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)\b", c_code))
+    names |= set(re.findall(r"\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", c_code))
+    names |= set(re.findall(r"\btypedef\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)\b", c_code))
+    names |= set(re.findall(r"\benum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", c_code))
+    names |= set(re.findall(r"\bunion\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", c_code))
+    return names
 
 
 def validate_claims(args: argparse.Namespace) -> int:
@@ -191,6 +379,7 @@ def validate_claims(args: argparse.Namespace) -> int:
         if claim_id in seen:
             errors.append(f"claim[{index}]: duplicate claim_id {claim_id}")
         seen.add(claim_id)
+    errors.extend(cross_claim_errors(claims, verdicts))
 
     verdict_by_id = {}
     for index, verdict in enumerate(verdicts, 1):

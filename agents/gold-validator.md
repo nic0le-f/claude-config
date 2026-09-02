@@ -53,6 +53,8 @@ For each claim, in order:
 
 **`function_name`** — needs local code behaviour: strings, imports, constants, xrefs, call-graph position, data flow, side effects. Check the name follows the `mw_` taxonomy and carries no `_likely` suffix (uncertainty belongs in your verdict, not the symbol).
 
+A claim with `"name_source":"recovered"` asserts the name is the binary's own upstream symbol, not the analyst's description. Hold it to a stricter bar: the evidence must identify the *specific* record it came from — a `pclntab` entry, a `FuncID` value, a DWARF entry, a symbol table row — and that record must name this exact function. Behavioural resemblance to a known runtime routine is not recovery; if the claim reasons "it looks like runtime.main", reject it and say the name is authored, not recovered. Where a `FuncID` or enum ordinal is cited, corroborate it against a second function in the same binary before accepting.
+
 **`type_definition`** — needs offset/size/access evidence, allocation size, ABI or API signature, or consistent data flow. A DWARF type *name* is not a layout. Reject field types and padding that DWARF, ABI, or observed access does not support.
 
 **`data_name`** — needs referencing code that establishes the semantic, not just the fact that bytes exist there.
@@ -60,6 +62,22 @@ For each claim, in order:
 **`function_comment`** — must be true and checkable. Reject speculation phrased as description.
 
 **`source_file`** — needs clustering evidence: call relationships, shared state or types, common API families, protocol boundaries. A single shared import is not a cluster.
+
+**`function_prototype`** — the highest-consequence kind, because a wrong signature propagates a wrong type to every call site. Every parameter needs its own evidence: its register or stack position, and how it is used. Check the arity and the register assignment against the disassembly, not against what the name suggests the function should take. A parameter typed from a single call site when the function has many is `needs_human`. A return type with no evidence is a rejection even if the parameters are right.
+
+**`variable_type`** — needs the accesses *through that variable*: offsets read or written, the width of each access, the allocating call's size argument, or the signature of a callee it is passed to. A pointer-to-struct claim requires at least one field access consistent with the struct's layout. Verify the type text names a struct that an accepted `type_definition` claim actually defines — a claim referencing an undefined type is a rejection.
+
+**`variable_name`** — needs evidence of the variable's role, from its own reads and writes. Reject a name imported from what the enclosing function is called: being inside `mw_c2_send_beacon` is not evidence that `var_70` is the beacon buffer. Check the `mw_` taxonomy and the no-`_likely` rule.
+
+**`data_type`** — needs the access pattern at that address: sizes, offsets, and the routines that read it. Bytes being there is not a layout.
+
+For any of the three variable/prototype kinds, list the function's actual variables from your own lane before ruling:
+
+```bash
+$BNPY bn_lane_query.py CASE_DIR/work/validator.bndb --vars 0x4658c0
+```
+
+If the claim's target variable does not exist, or its current type contradicts the claimed one without the evidence explaining why, reject.
 
 ## Windows APIs
 

@@ -94,6 +94,29 @@ def executive_summary(
     )
     if total_fns:
         lines.append(f"- {named} of {total_fns} functions carry validated names; the remainder are uncurated.")
+
+    # Type recovery is only meaningful if a recovered type is actually applied to
+    # something, so report the application counts alongside the definitions.
+    protos = len(grouped.get("function_prototype", []))
+    var_types = len(grouped.get("variable_type", []))
+    var_names = len(grouped.get("variable_name", []))
+    data_types = len(grouped.get("data_type", []))
+    if protos or var_types or var_names or data_types:
+        parts = []
+        if protos:
+            parts.append(f"{protos} function {plural(protos, 'prototype')}")
+        if var_types:
+            parts.append(f"{var_types} variable {plural(var_types, 'retype')}")
+        if var_names:
+            parts.append(f"{var_names} variable {plural(var_names, 'rename')}")
+        if data_types:
+            parts.append(f"{data_types} data {plural(data_types, 'retype')}")
+        lines.append(f"- Type recovery applied: {', '.join(parts)}.")
+    elif types:
+        lines.append(
+            f"- {types} type {plural(types, 'definition')} {'is' if types == 1 else 'are'} defined but "
+            "applied to no variable, parameter or data symbol; they do not yet appear in decompiled output."
+        )
     open_items = []
     if counts["needs_human"]:
         n = counts["needs_human"]
@@ -224,7 +247,12 @@ def main() -> int:
     if type_layouts:
         report_lines.append(f"- DWARF app struct layouts: `{len(type_layouts.get('structs', []))}`")
     if applied_claims:
-        report_lines.append(f"- Applied type definitions: `{len(applied_claims.get('type_definition', []))}`")
+        for phase in ("type_definition", "function_prototype", "variable_type", "variable_name"):
+            rows = applied_claims.get(phase, [])
+            if rows:
+                report_lines.append(f"- Applied `{phase}` claims: `{len(rows)}`")
+        if applied_claims.get("other"):
+            report_lines.append(f"- Applied other claims: `{len(applied_claims['other'])}`")
     report_lines.extend(
         [
             "",
