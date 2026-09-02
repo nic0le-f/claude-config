@@ -358,8 +358,10 @@ def cross_claim_errors(
                 "function_prototype claim; name the parameter in the prototype instead"
             )
 
-    # Same variable claimed twice for the same attribute.
-    for kind in sorted(VARIABLE_KINDS):
+    # Two claims of one kind on one target. Every kind but type_definition
+    # writes a single slot per target, so the second application silently
+    # overwrites the first and both are still reported as applied.
+    for kind in sorted(VALID_KINDS - {"type_definition"}):
         seen: dict[str, str] = {}
         for claim in claims:
             if claim.get("kind") != kind:
@@ -368,10 +370,31 @@ def cross_claim_errors(
             if key in seen:
                 errors.append(
                     f"{claim.get('claim_id')}: duplicate {kind} for target {key} "
-                    f"(already claimed by {seen[key]})"
+                    f"(already claimed by {seen[key]}); the later application would "
+                    "silently overwrite the earlier — merge them into one claim"
                 )
             else:
                 seen[key] = str(claim.get("claim_id"))
+
+    # function_comment and source_file both land in the same comment slot via
+    # set_comment_at, so they collide across kinds on a shared target.
+    comment_owner: dict[str, tuple[str, str]] = {}
+    for claim in claims:
+        kind = claim.get("kind")
+        if kind not in ("function_comment", "source_file"):
+            continue
+        key = str(claim.get("target", "")).strip().lower()
+        claim_id = str(claim.get("claim_id"))
+        if key in comment_owner:
+            prev_kind, prev_id = comment_owner[key]
+            if prev_kind != kind:
+                errors.append(
+                    f"{claim_id}: {kind} on target {key} collides with {prev_kind} "
+                    f"{prev_id}; both write the same comment via set_comment_at — "
+                    "combine them into a single claim"
+                )
+        else:
+            comment_owner[key] = (kind, claim_id)
     return errors
 
 
