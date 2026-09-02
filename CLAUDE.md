@@ -12,8 +12,11 @@ Precise: hex as `0x…`, offsets, register states, CWE IDs, CVSS where relevant.
 - Reports must open with an Executive Summary, then a Table of Contents, before any other sections.
 - Every function or script analysis must include a call graph. For long functions, break into labeled phases with address ranges (e.g., "Phase 1 — Entry (`0x17F000`–`0x17F080`)").
 - All addresses in VA hex format (`0x17F32A60`), never EA decimal.
-- Use `malcat-reverse-engineer` for files open in Malcat MCP; use `binninja-agent` for Binary Ninja workflows. Never use either for scripts — use `script-analyzer`.
-- After any report containing Windows API calls, always run `msdn-qa` to validate them.
+- Native binaries go through the `binaryninja-gold-re` pipeline via `re-agent`. Strictly headless — never use `binary_ninja_mcp` write tools.
+- Only accepted claims reach `gold.bndb`. Propose claims with local code evidence; the blind `gold-validator` decides. Malcat, YARA, capa, VT, MalwareBazaar and OTX are leads and never back a claim.
+- Use `malcat-reverse-engineer` for headless Malcat triage. Scripts, documents, archives, APKs and firmware go to `script-analyzer` — that lane produces no BNDB and no claims.
+- `msdn-qa` runs inside validation on any claim citing a Win32 API or constant; a misread signature is a rejection. Also run it standalone on any finished report containing Windows API calls.
+- After `gold.bndb` exists: `/re-triage`, `/re-dive`, `/re-compare`. All three are read-only.
 - When `msdn-qa` flags a constant name: verify the hex value in the binary first — the binary is source of truth; fix the name to match the hex, not the other way around.
 
 ## Token Hygiene
