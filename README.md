@@ -8,23 +8,33 @@ Defined in `agents/`. Visible via `/agents` dialog.
 
 | Agent | Model | Description |
 |-------|-------|-------------|
-| `re-agent` | opus | Autonomous RE pipeline — 8-phase analysis from intake to report. Spawns subagents, writes structured reports, tracks progress across sessions via project memory. `acceptEdits` permission mode, 100 turn cap. |
-| `malcat-reverse-engineer` | opus | Binary analysis via Malcat MCP — file format parsing, strings, entropy, YARA, anomalies, transform/decrypt chains, decompilation. Use for breadth-first structural analysis. |
-| `binninja-agent` | sonnet | Binary Ninja MCP specialist — deep decompilation, renaming, retyping, xrefs. Follows `mw_` naming and confidence conventions. Use for surgical depth on specific functions. |
-| `script-analyzer` | opus | Malicious script analysis — deobfuscation, call graphs, IOC extraction. Supports PS, Python, JS, VBA, shell. Standalone or subagent mode. |
-| `enrichment-agent` | sonnet | Threat intel enrichment — VirusTotal, MalwareBazaar, Shodan lookups. |
-| `msdn-qa` | sonnet | Validates Windows API calls in analysis reports against MSDN documentation. Standalone or subagent mode. |
+| `re-agent` | opus | Orchestrates the gold RE pipeline end to end — intake, unpack, case init, fact export, claim emission, blind validation, apply, report. `acceptEdits`, 150 turn cap. |
+| `gold-validator` | opus | Blind adversarial validator. Attacks each proposed claim from clean evidence and writes accepted/rejected/needs_human verdicts. Never sees analyst notes. |
+| `malcat-reverse-engineer` | opus | Headless Malcat static triage — format, sections, entropy, signature hits, strings, carved files. Lead generator only. |
+| `script-analyzer` | opus | Owns the non-binary lane — scripts, documents (olevba/oleobj), archives with recursion, APK and firmware. Produces no BNDB and no claims. |
+| `enrichment-agent` | sonnet | Threat intel enrichment — VirusTotal, MalwareBazaar, Shodan. Leads only. |
+| `msdn-qa` | sonnet | Win32 API validation. Mode A rules on claims inside the validator; Mode B audits a finished report. |
+| `re-triage` | opus | Post-gold capability fingerprint and family verdict. Read-only. |
+| `re-dive` | opus | Post-gold targeted deep dive on one question. Read-only. |
+| `re-compare` | opus | Post-gold comparison across two or more validated cases. Read-only. |
 
-`re-agent` is the main entry point for full-pipeline analysis. It orchestrates the other agents as subagents. Malcat and Binary Ninja agents are complementary — use Malcat for breadth (format, strings, anomalies), BN for depth (decompilation, annotation).
+`re-agent` is the entry point for native binaries. The three `re-*` agents run afterwards, against a validated `gold.bndb`.
+
+## The Gate
+
+Only accepted claims reach `gold.bndb`. Every proposed edit — name, comment, type, data label, source-file assignment — is written as a JSONL claim with its evidence, ruled on by a blind validator working from clean evidence, and applied only if accepted. Analysis is strictly headless: `bnpython3` scripts against `.bndb` files, never the Binary Ninja MCP write tools.
+
+Malcat, YARA, capa, VirusTotal, MalwareBazaar and OTX are leads. They prioritise what you look at; they never back a claim.
 
 ## Skills
 
 | Command | Description |
 |---------|-------------|
-| `/re-triage` | Cold triage — classify sample, check for packing, produce triage summary (Phases 0–2 only). Pass sample path as argument. |
-| `/re-dive` | Targeted deep dive on a specific question about a sample. Reads existing findings, skips re-triage. |
-| `/re-compare` | Multi-sample comparative analysis — shared code, infrastructure overlap, lineage. |
-| `/malware-analyst` | Full analyst role activation for open-ended investigation. |
+| `binaryninja-gold-re` | The pipeline. Case workspace, claims, blind validation, gold BNDB, report. Invoked by `re-agent`. |
+| `/re-triage` | Post-gold capability fingerprint and family verdict. Pass a case dir or sample name. |
+| `/re-dive` | Post-gold deep dive. `/re-dive <case> "<question>"`. |
+| `/re-compare` | Post-gold comparison across validated cases. |
+| `/malware-analyst` | Analyst conventions — naming, evidence policy, YARA standards, report format. |
 | `/audit-codebase` | Security audit of a source folder. |
 | `/disclose` | Prepare responsible disclosure. |
 
@@ -32,34 +42,37 @@ Planning uses native plan mode. Code work uses native worktrees (`EnterWorktree`
 
 ## Typical Session Flow
 
-Always `cd` into the specific sample folder before starting Claude. This scopes reports and agent memory to the investigation.
-
 ```
-cd ~/Downloads/samples/sample-xyz/
-claude
-```
+1. Native binary?      → re-agent drives binaryninja-gold-re:
+                           0 intake      hashes, classify, VT/MalwareBazaar
+                           1 unpack      entropy>7.0, <10 imports, UPX/Themida/VMP
+                                         → bngold_case.py add-unpacked records lineage
+                           2 malcat      headless triage → CASE_DIR/triage/ (leads)
+                           3 init        bngold_case.py init → CASE_DIR/
+                           4 facts       bn_export_facts.py → evidence/bn_facts.json
+                                         ELF/Go: elf_go_context.py, elf_go_type_layout.py
+                           5 analyse     emit claims/claims.jsonl
+                           6 validate    gold-validator (blind) + msdn-qa → verdicts.jsonl
+                           7 apply       bn_apply_claims.py → gold/gold.bndb
+                           8 report      bngold_report.py → reports/final.md
 
-```
-1. /re-triage [path]       → enrichment (VT/MalwareBazaar) + format triage + packing check
-                              malcat-reverse-engineer handles binary structure if Malcat is open
+2. Script / doc /      → script-analyzer owns the lane end to end.
+   archive / APK?        No case dir, no claims, no BNDB.
 
-2. Open Malcat, Ctrl+M     → start MCP server
-   /re-dive "<question>"   → malcat-reverse-engineer for breadth:
-                              file format, sections, entropy, strings, YARA, anomalies,
-                              transform/decrypt chains, carved/embedded files
-
-3. Specific function?      → /re-dive "decompile and annotate 0x<VA>"
-                              binninja-agent for depth:
-                              decompilation, CFG, bulk renaming/typing, xref tracing
-
-4. Script found?           → script-analyzer spawned automatically
-                              writes to reports/ if standalone
-
-5. Report written?         → msdn-qa runs automatically (per CLAUDE.md)
-                              validates all Windows API calls, returns corrections
+3. Gold BNDB exists?   → /re-triage   capability fingerprint + family verdict
+                         /re-dive     one targeted question
+                         /re-compare  cross-sample analysis
 ```
 
-**Malcat MCP note**: start Malcat and enable the MCP server (`Ctrl+M`) before launching Claude. If Claude starts without it, use `/mcp` to deactivate and reactivate the server after Malcat is running.
+Cases live in `~/re-cases/` by default; override with `BNGOLD_CASES_DIR` or `--cases-dir`.
+
+**Setup**: the pipeline shells out to Binary Ninja's bundled Python. `settings.json` is untracked, so add the allowlist entry locally:
+
+```json
+{ "permissions": { "allow": ["Bash(/home/ubi/Applications/BinaryNinja/binaryninja/bnpython3:*)"] } }
+```
+
+There is no `FINDINGS.md` and no `phases/` directory. Accepted claims in `claims/verdicts.jsonl` are the confirmed-facts ledger, with evidence attached per fact; `reports/final.md` is the narrative.
 
 ## Hooks
 
