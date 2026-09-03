@@ -305,6 +305,75 @@ def is_va_hex(text: str) -> bool:
     return True
 
 
+def superseded_ids(claims: list[dict[str, Any]]) -> set[str]:
+    """claim_ids retired by another claim in the same list.
+
+    Callers pass a list with rejected claims already removed, so a superseding
+    claim that was itself rejected retires nothing and the original stands.
+    """
+    return {
+        str(claim["supersedes"])
+        for claim in claims
+        if claim.get("supersedes")
+    }
+
+
+def supersede_errors(
+    claims: list[dict[str, Any]], verdicts: list[dict[str, Any]] | None = None
+) -> list[str]:
+    """Shape rules for the supersedes field.
+
+    A supersede replaces a claim whose verdict already stands. Editing such a
+    claim in place would leave its verdict adjudicating text that no longer
+    exists, so this is the sanctioned way to correct or extend one.
+    """
+    errors = []
+    by_id = {str(claim.get("claim_id")): claim for claim in claims}
+    has_verdict = {
+        str(verdict.get("claim_id"))
+        for verdict in (verdicts or [])
+        if verdict.get("claim_id")
+    }
+
+    replacing: dict[str, list[str]] = {}
+    for claim in claims:
+        target_id = claim.get("supersedes")
+        if not target_id:
+            continue
+        claim_id = str(claim.get("claim_id"))
+        target_id = str(target_id)
+        replacing.setdefault(target_id, []).append(claim_id)
+
+        if target_id == claim_id:
+            errors.append(f"{claim_id}: supersedes itself")
+            continue
+        prior = by_id.get(target_id)
+        if prior is None:
+            errors.append(
+                f"{claim_id}: supersedes {target_id!r}, which is not a claim in this file"
+            )
+            continue
+        if prior.get("kind") != claim.get("kind"):
+            errors.append(
+                f"{claim_id}: supersedes {target_id} but is a "
+                f"{claim.get('kind')!r} where that claim is a {prior.get('kind')!r}; "
+                "a supersede replaces a claim of the same kind"
+            )
+        if target_id not in has_verdict:
+            errors.append(
+                f"{claim_id}: supersedes {target_id}, which has no verdict yet; "
+                "an unreviewed claim should be corrected in place, not superseded"
+            )
+
+    for target_id, owners in sorted(replacing.items()):
+        if len(owners) > 1:
+            errors.append(
+                f"claim {target_id} is superseded by more than one claim "
+                f"({', '.join(sorted(owners))}); which text was adjudicated is ambiguous"
+            )
+    return errors
+
+
 def cross_claim_errors(
     claims: list[dict[str, Any]], verdicts: list[dict[str, Any]] | None = None
 ) -> list[str]:
@@ -315,7 +384,9 @@ def cross_claim_errors(
 
     Only claims that could still reach gold.bndb are considered. A claim the
     validator already rejected cannot conflict with anything, so counting it
-    would report a conflict the analyst has no way to clear.
+    would report a conflict the analyst has no way to clear. A claim retired by
+    a supersede is dropped for the same reason: the pair is a deliberate
+    replacement, not a collision.
     """
     rejected = {
         verdict.get("claim_id")
@@ -323,6 +394,11 @@ def cross_claim_errors(
         if verdict.get("status") == "rejected"
     }
     claims = [claim for claim in claims if claim.get("claim_id") not in rejected]
+    claims = [
+        claim
+        for claim in claims
+        if str(claim.get("claim_id")) not in superseded_ids(claims)
+    ]
     errors = []
 
     # Two type_definition claims defining the same type name: whichever is
@@ -419,6 +495,7 @@ def validate_claims(args: argparse.Namespace) -> int:
         if claim_id in seen:
             errors.append(f"claim[{index}]: duplicate claim_id {claim_id}")
         seen.add(claim_id)
+    errors.extend(supersede_errors(claims, verdicts))
     errors.extend(cross_claim_errors(claims, verdicts))
 
     verdict_by_id = {}

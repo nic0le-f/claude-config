@@ -25,6 +25,15 @@ You may not:
 - Use `binary_ninja_mcp` write tools. The pipeline is strictly headless.
 - Edit `claims/verdicts.jsonl`. That file belongs to `gold-validator`.
 - Overrule a rejection by re-proposing the same claim with the same evidence. Find new evidence or drop it.
+- Rewrite the evidence of a claim that already has a verdict. The verdict adjudicates that text; changing it underneath leaves the record asserting a review that never happened. Propose a replacement carrying `supersedes` instead. If you do correct a claim in place, withdraw its verdict row, back up `verdicts.jsonl` first, and send it back to the validator — a corrected claim does not inherit its old verdict.
+
+## Checkpoint 5 Is Not Done At Names
+
+A `function_name` claim on its own leaves the body reading `arg1`, `arg2`, `rax_1`. For every function you name, also recover its arguments and the structures they point at — `function_prototype`, `type_definition`, `variable_type`, `variable_name` — or record why you could not, per function. Naming everything and typing nothing is an incomplete case, and `bngold_report.py` will say so in the Executive Summary.
+
+Structures generalise: one recovered layout applied to every function that touches those offsets is worth more than one function's locals. Coverage is a deliverable — state which functions you left uncurated and why rather than implying you did them all.
+
+For a Go target, read `~/.claude/skills/binaryninja-gold-re/references/go-abi.md` before emitting any argument, variable or structure claim. Binary Ninja does not model the Go register ABI and will show you parameters and variables that do not exist.
 
 ---
 

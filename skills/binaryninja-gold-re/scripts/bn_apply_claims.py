@@ -36,6 +36,17 @@ def accepted_claims(case_dir: Path) -> list[dict[str, Any]]:
     for verdict in verdicts:
         if verdict.get("status") == "accepted" and verdict.get("claim_id") in claims:
             accepted.append(claims[verdict["claim_id"]])
+
+    # An accepted claim that supersedes another retires it. Both write the same
+    # slot, so applying both would leave the result decided by ordering; only
+    # the replacement applies. A superseding claim that was not accepted retires
+    # nothing, which leaves the original standing.
+    retired = {str(claim["supersedes"]) for claim in accepted if claim.get("supersedes")}
+    if retired:
+        kept = [claim for claim in accepted if str(claim["claim_id"]) not in retired]
+        for claim_id in sorted(retired):
+            print(f"[bngold] retired superseded claim {claim_id}", flush=True)
+        return kept
     return accepted
 
 
