@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -19,8 +20,40 @@ VALID_KINDS = {
     "data_name",
     "type_definition",
     "source_file",
+    # Type application. type_definition only registers a type in the database;
+    # these are the kinds that make a recovered type appear in decompiled output.
+    "function_prototype",
+    "variable_name",
+    "variable_type",
+    "data_type",
 }
 VALID_STATUS = {"proposed", "accepted", "rejected", "needs_human"}
+
+# Kinds that propose a symbol name.
+NAME_KINDS = {"function_name", "data_name", "variable_name"}
+
+# Whether a proposed function name is the analyst's own ("authored", requiring
+# the mw_ actor prefix) or a genuine upstream symbol name read out of the
+# binary's own metadata ("recovered", which must not carry the prefix).
+VALID_NAME_SOURCES = {"authored", "recovered"}
+
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SYMBOL_SOURCE_TOKENS = (
+    "pclntab",
+    "dwarf",
+    "symtab",
+    "symbol table",
+    "func_id",
+    "funcid",
+    "buildinfo",
+    "go:func",
+    "export table",
+)
+
+# Kinds whose target addresses a variable inside a function: "0xVA#var_name".
+VARIABLE_KINDS = {"variable_name", "variable_type"}
+# Kinds whose proposed_value is C type text rather than an identifier.
+TYPE_TEXT_KINDS = {"type_definition", "function_prototype", "variable_type", "data_type"}
 
 DEFAULT_CASES_DIR = os.environ.get("BNGOLD_CASES_DIR", "~/re-cases")
 
@@ -176,7 +209,278 @@ def validate_claim(claim: dict[str, Any], index: int) -> list[str]:
         )
     if claim.get("kind") == "type_definition" and "typedef" not in str(claim.get("proposed_value", "")) and "struct" not in str(claim.get("proposed_value", "")) and "enum" not in str(claim.get("proposed_value", "")):
         errors.append(f"{prefix}: type_definition proposed_value should contain C type text")
+
+    kind = claim.get("kind")
+    target = str(claim.get("target", ""))
+    value = str(claim.get("proposed_value", "")).strip()
+
+    # Target shape. Variable kinds carry "0xVA#var_name"; everything else is a
+    # bare VA. Getting this wrong silently misapplies an edit, so it is fatal.
+    if kind in VARIABLE_KINDS:
+        if "#" not in target:
+            errors.append(
+                f"{prefix}: {kind} target must be '0xVA#current_var_name' (got {target!r})"
+            )
+        else:
+            addr_part, _, var_part = target.partition("#")
+            if not is_va_hex(addr_part):
+                errors.append(f"{prefix}: target address must be VA hex (got {addr_part!r})")
+            if not var_part.strip():
+                errors.append(f"{prefix}: {kind} target is missing the variable name")
+    elif kind in VALID_KINDS and not is_va_hex(target):
+        errors.append(f"{prefix}: target must be VA hex like 0x401000 (got {target!r})")
+
+    if kind in TYPE_TEXT_KINDS and not value:
+        errors.append(f"{prefix}: {kind} needs non-empty C type text")
+
+    # A prototype must actually look like a function signature, otherwise
+    # parse_type_string quietly yields something that is not applied.
+    if kind == "function_prototype" and "(" not in value:
+        errors.append(
+            f"{prefix}: function_prototype proposed_value must be a full C signature "
+            f"with a parameter list (got {value!r})"
+        )
+
+    # Naming convention is enforced here rather than left to the validator's
+    # judgement, so a convention slip never reaches gold.bndb.
+    if kind in NAME_KINDS:
+        name_source = str(claim.get("name_source", "authored"))
+        if name_source not in VALID_NAME_SOURCES:
+            errors.append(
+                f"{prefix}: name_source must be one of {sorted(VALID_NAME_SOURCES)} "
+                f"(got {name_source!r})"
+            )
+        if not value:
+            errors.append(f"{prefix}: {kind} needs a non-empty name")
+        else:
+            # The 'mw_' prefix exists to answer one question: which functions
+            # did the analyst curate, in a binary that may hold thousands of
+            # stock ones. That question only applies to the global function
+            # namespace, so only function_name carries the prefix. Variables
+            # are function-scoped and types are read in context, and prefixing
+            # them only makes decompiled output harder to read.
+            if kind == "function_name":
+                if name_source == "authored" and not value.startswith("mw_"):
+                    errors.append(
+                        f"{prefix}: a renamed function must be prefixed 'mw_' (got {value!r}); "
+                        "if this is a genuine upstream symbol name, set "
+                        '"name_source":"recovered" and cite the symbol source'
+                    )
+                if name_source == "recovered":
+                    evidence_text = " ".join(str(item).lower() for item in (evidence or []))
+                    if not any(token in evidence_text for token in SYMBOL_SOURCE_TOKENS):
+                        errors.append(
+                            f"{prefix}: name_source 'recovered' needs evidence citing a symbol "
+                            f"source ({', '.join(SYMBOL_SOURCE_TOKENS)})"
+                        )
+                    if value.startswith("mw_"):
+                        errors.append(
+                            f"{prefix}: a recovered upstream name must not carry the 'mw_' "
+                            f"actor prefix (got {value!r})"
+                        )
+            elif value.startswith("mw_"):
+                errors.append(
+                    f"{prefix}: {kind} takes the plain recovered name without the 'mw_' "
+                    f"prefix (got {value!r}); the prefix is for functions only"
+                )
+            if value != value.lower():
+                errors.append(f"{prefix}: name must be snake_case (got {value!r})")
+            if value.endswith("_likely") or "_likely_" in value:
+                errors.append(f"{prefix}: '_likely' is not allowed in a name; use claim status")
+            if not IDENTIFIER_RE.match(value):
+                errors.append(
+                    f"{prefix}: name must be a valid C identifier (got {value!r})"
+                )
     return errors
+
+
+def is_va_hex(text: str) -> bool:
+    text = str(text).strip()
+    if not text.lower().startswith("0x"):
+        return False
+    try:
+        int(text, 16)
+    except ValueError:
+        return False
+    return True
+
+
+def superseded_ids(claims: list[dict[str, Any]]) -> set[str]:
+    """claim_ids retired by another claim in the same list.
+
+    Callers pass a list with rejected claims already removed, so a superseding
+    claim that was itself rejected retires nothing and the original stands.
+    """
+    return {
+        str(claim["supersedes"])
+        for claim in claims
+        if claim.get("supersedes")
+    }
+
+
+def supersede_errors(
+    claims: list[dict[str, Any]], verdicts: list[dict[str, Any]] | None = None
+) -> list[str]:
+    """Shape rules for the supersedes field.
+
+    A supersede replaces a claim whose verdict already stands. Editing such a
+    claim in place would leave its verdict adjudicating text that no longer
+    exists, so this is the sanctioned way to correct or extend one.
+    """
+    errors = []
+    by_id = {str(claim.get("claim_id")): claim for claim in claims}
+    has_verdict = {
+        str(verdict.get("claim_id"))
+        for verdict in (verdicts or [])
+        if verdict.get("claim_id")
+    }
+
+    replacing: dict[str, list[str]] = {}
+    for claim in claims:
+        target_id = claim.get("supersedes")
+        if not target_id:
+            continue
+        claim_id = str(claim.get("claim_id"))
+        target_id = str(target_id)
+        replacing.setdefault(target_id, []).append(claim_id)
+
+        if target_id == claim_id:
+            errors.append(f"{claim_id}: supersedes itself")
+            continue
+        prior = by_id.get(target_id)
+        if prior is None:
+            errors.append(
+                f"{claim_id}: supersedes {target_id!r}, which is not a claim in this file"
+            )
+            continue
+        if prior.get("kind") != claim.get("kind"):
+            errors.append(
+                f"{claim_id}: supersedes {target_id} but is a "
+                f"{claim.get('kind')!r} where that claim is a {prior.get('kind')!r}; "
+                "a supersede replaces a claim of the same kind"
+            )
+        if target_id not in has_verdict:
+            errors.append(
+                f"{claim_id}: supersedes {target_id}, which has no verdict yet; "
+                "an unreviewed claim should be corrected in place, not superseded"
+            )
+
+    for target_id, owners in sorted(replacing.items()):
+        if len(owners) > 1:
+            errors.append(
+                f"claim {target_id} is superseded by more than one claim "
+                f"({', '.join(sorted(owners))}); which text was adjudicated is ambiguous"
+            )
+    return errors
+
+
+def cross_claim_errors(
+    claims: list[dict[str, Any]], verdicts: list[dict[str, Any]] | None = None
+) -> list[str]:
+    """Conflicts that are only visible across claims, not within one claim.
+
+    Each of these produced a silent wrong result in gold.bndb rather than an
+    error, which is why they are checked before the validator ever runs.
+
+    Only claims that could still reach gold.bndb are considered. A claim the
+    validator already rejected cannot conflict with anything, so counting it
+    would report a conflict the analyst has no way to clear. A claim retired by
+    a supersede is dropped for the same reason: the pair is a deliberate
+    replacement, not a collision.
+    """
+    rejected = {
+        verdict.get("claim_id")
+        for verdict in (verdicts or [])
+        if verdict.get("status") == "rejected"
+    }
+    claims = [claim for claim in claims if claim.get("claim_id") not in rejected]
+    claims = [
+        claim
+        for claim in claims
+        if str(claim.get("claim_id")) not in superseded_ids(claims)
+    ]
+    errors = []
+
+    # Two type_definition claims defining the same type name: whichever is
+    # applied last wins and the other is reported applied but discarded.
+    definers: dict[str, list[str]] = {}
+    for claim in claims:
+        if claim.get("kind") != "type_definition":
+            continue
+        for name in type_names_in(str(claim.get("proposed_value", ""))):
+            definers.setdefault(name, []).append(str(claim.get("claim_id")))
+    for name, owners in sorted(definers.items()):
+        if len(owners) > 1:
+            errors.append(
+                f"type name {name!r} is defined by multiple claims ({', '.join(sorted(owners))}); "
+                "last write would silently win — merge them into one claim"
+            )
+
+    # A function_prototype replaces the function's parameter variables, so a
+    # variable claim naming a parameter of that same function is applied
+    # against a variable that no longer exists.
+    proto_funcs = {
+        str(claim.get("target", "")).strip().lower()
+        for claim in claims
+        if claim.get("kind") == "function_prototype"
+    }
+    for claim in claims:
+        if claim.get("kind") not in VARIABLE_KINDS:
+            continue
+        addr_part = str(claim.get("target", "")).partition("#")[0].strip().lower()
+        if addr_part in proto_funcs:
+            errors.append(
+                f"{claim.get('claim_id')}: targets a variable in {addr_part}, which also has a "
+                "function_prototype claim; name the parameter in the prototype instead"
+            )
+
+    # Two claims of one kind on one target. Every kind but type_definition
+    # writes a single slot per target, so the second application silently
+    # overwrites the first and both are still reported as applied.
+    for kind in sorted(VALID_KINDS - {"type_definition"}):
+        seen: dict[str, str] = {}
+        for claim in claims:
+            if claim.get("kind") != kind:
+                continue
+            key = str(claim.get("target", "")).strip().lower()
+            if key in seen:
+                errors.append(
+                    f"{claim.get('claim_id')}: duplicate {kind} for target {key} "
+                    f"(already claimed by {seen[key]}); the later application would "
+                    "silently overwrite the earlier — merge them into one claim"
+                )
+            else:
+                seen[key] = str(claim.get("claim_id"))
+
+    # function_comment and source_file both land in the same comment slot via
+    # set_comment_at, so they collide across kinds on a shared target.
+    comment_owner: dict[str, tuple[str, str]] = {}
+    for claim in claims:
+        kind = claim.get("kind")
+        if kind not in ("function_comment", "source_file"):
+            continue
+        key = str(claim.get("target", "")).strip().lower()
+        claim_id = str(claim.get("claim_id"))
+        if key in comment_owner:
+            prev_kind, prev_id = comment_owner[key]
+            if prev_kind != kind:
+                errors.append(
+                    f"{claim_id}: {kind} on target {key} collides with {prev_kind} "
+                    f"{prev_id}; both write the same comment via set_comment_at — "
+                    "combine them into a single claim"
+                )
+        else:
+            comment_owner[key] = (kind, claim_id)
+    return errors
+
+
+def type_names_in(c_code: str) -> set[str]:
+    names = set(re.findall(r"\btypedef\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)\b", c_code))
+    names |= set(re.findall(r"\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", c_code))
+    names |= set(re.findall(r"\btypedef\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)\b", c_code))
+    names |= set(re.findall(r"\benum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", c_code))
+    names |= set(re.findall(r"\bunion\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{", c_code))
+    return names
 
 
 def validate_claims(args: argparse.Namespace) -> int:
@@ -191,6 +495,8 @@ def validate_claims(args: argparse.Namespace) -> int:
         if claim_id in seen:
             errors.append(f"claim[{index}]: duplicate claim_id {claim_id}")
         seen.add(claim_id)
+    errors.extend(supersede_errors(claims, verdicts))
+    errors.extend(cross_claim_errors(claims, verdicts))
 
     verdict_by_id = {}
     for index, verdict in enumerate(verdicts, 1):

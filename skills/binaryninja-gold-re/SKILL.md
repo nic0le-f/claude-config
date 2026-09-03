@@ -85,6 +85,32 @@ Writes `evidence/file_info.txt`, `evidence/app_symbols.txt`, `evidence/go_contex
 
 Work from `evidence/bn_facts.json` and `work/analyst.bndb`. Emit every proposed edit as a JSONL row in `claims/claims.jsonl`. Never write to `gold/gold.bndb` directly.
 
+`bn_facts.json` carries strings, functions, the call graph, sections and symbols. Per-function detail is queried on demand — one BNDB load answers a batch, which matters on a statically linked Go database:
+
+```bash
+$BNPY $SKILL/bn_lane_query.py CASE_DIR/work/analyst.bndb \
+  --decompile 0x4658c0 --vars 0x4658c0 --xrefs 0x7967a0
+```
+
+**A name alone is not a curated function.** For every function you claim a `function_name` for, you must also either recover its arguments and the structures they point at, or state explicitly why you could not. Naming a function tells a reader what it is; typing its arguments and structures is what makes the body readable. A case where every function is named and nothing is typed is an incomplete case — the report already says so, and checkpoint 5 is not finished until the workflow agrees with it.
+
+Claim the work in this order. Each step makes the next one legible:
+
+1. `function_name` — what the function is.
+2. `type_definition` — the structures it operates on, with offset/size/access evidence.
+3. `function_prototype` — the signature, naming and typing every parameter at once. Highest leverage: it propagates types to every call site.
+4. `variable_type` then `variable_name` for the locals that still read as `rax_1` / `var_70`.
+
+Where step 2, 3 or 4 produces nothing, that is a finding to record, not a step to skip silently. Legitimate reasons, each of which belongs in a `function_comment` or in the report's unresolved list:
+
+- The parameters are ABI artifacts the caller never sets, so there is nothing to name (see `references/go-abi.md`).
+- The structure is reached only through offsets the code never reveals — no field access, no allocation size, no callee signature.
+- The function is too heavily inlined to attribute variables to a single role.
+
+Recovering a structure is worth more than recovering one function's locals: a struct recovered from one parser and applied to the three other functions that share it improves every one of them. Look for the same offsets accessed across functions before deciding a layout is local.
+
+**Coverage.** Do not rename every variable in a large function. Curate the ones carrying config, buffers, handles, sizes and loop state — the ones a reader needs to follow the logic. An inlined Go function with 1,800 variables and 2,000 lines of HLIL is not a rename target; naming its locals wholesale is guessing at scale. Record which functions you left uncurated and why, so the report states coverage rather than implying it.
+
 ### 6 — Validate (blind)
 
 ```bash
@@ -103,7 +129,15 @@ Re-run `validate-claims` after verdicts land to confirm counts.
 ```bash
 $BNPY $SKILL/bn_apply_claims.py CASE_DIR
 ```
-Applies accepted `type_definition` claims first as one dependency-sorted batch, then function names, comments, data names and source-file comments. Accepted claims only.
+Accepted claims only, applied in a fixed order that the phases depend on:
+
+1. `type_definition` — one dependency-sorted batch, so later phases can reference the types.
+2. `function_prototype` — before any variable work, because a new signature replaces the function's parameter variables.
+3. variable targets are resolved to concrete variables — before the first rename, since a rename invalidates lookup by the old name.
+4. `variable_type`, then `variable_name`.
+5. `data_type`, `data_name`, `function_name`, comments.
+
+Every write is read back and compared. If an edit did not take effect the run fails rather than reporting it applied — assigning `Function.type` directly, for instance, is a silent no-op in this API version, so prototypes go through `set_user_type` plus reanalysis. `reports/applied_claims.json` records what landed per phase.
 
 ### 8 — Report
 
@@ -122,13 +156,78 @@ Author YARA rules — following `/malware-analyst` standards — into `reports/r
 {"claim_id":"fn_401000_name","kind":"function_name","target":"0x401000","proposed_value":"mw_config_parse_c2_list","confidence":"high","evidence":["xref to string 'c2list='","calls strtok/inet_addr","writes into config struct at +0x18"],"status":"proposed"}
 ```
 
-Kinds: `function_name`, `function_comment`, `data_name`, `type_definition`, `source_file`.
+| Kind | Target | `proposed_value` |
+|---|---|---|
+| `function_name` | `0xVA` | `mw_`-prefixed snake_case name |
+| `function_comment` | `0xVA` | comment text |
+| `data_name` | `0xVA` | plain snake_case name, no prefix |
+| `source_file` | `0xVA` | recovered source path |
+| `type_definition` | `0xVA` | C struct/union/enum/typedef text |
+| `function_prototype` | `0xVA` | full C signature — `int64_t f(struct c2_config* cfg, uint64_t len)` |
+| `variable_type` | `0xVA#current_var_name` | C type text — `struct c2_config*` |
+| `variable_name` | `0xVA#current_var_name` | plain snake_case name, no prefix |
+| `data_type` | `0xVA` | C type text |
 
-`target` is always VA hex (`0x17F32A60`), never EA decimal.
+`target` is always VA hex (`0x17F32A60`), never EA decimal. For a function claim it must be the **function start**, not an address inside the body.
+
+`type_definition` only registers a type in the database. A recovered struct appears in decompiled output only when something is retyped to it — that is what `function_prototype`, `variable_type` and `data_type` are for. A case that defines types and applies none has not recovered them; the report says so explicitly.
+
+### Variable targets
+
+Variables are addressed by their **current** name in the analyst lane. Get the exact target string — and the current type — from:
+
+```bash
+$BNPY $SKILL/bn_lane_query.py CASE_DIR/work/analyst.bndb --vars 0x4658c0
+```
+
+Each row carries a ready-to-use `target`, the current `type`, `width`, `source_type` and whether it is a parameter. Do not hand-assemble a target.
+
+Two rules the shape check enforces, because both silently corrupted `gold.bndb` before:
+- A `function_prototype` claim replaces the function's parameter variables. Never pair it with a `variable_name` / `variable_type` claim on the same function — name and type the parameters inside the prototype instead.
+- Two `type_definition` claims may not define the same type name. Merge them into one claim; otherwise the last applied silently wins.
+
+### Silent-failure modes
+
+Each of these produced a wrong or empty `gold.bndb` while reporting success. The scripts now catch all five; they are written down because a claim author who understands them writes better claims, and because anyone extending the scripts will meet them again.
+
+| Trap | What happened | Guard |
+|---|---|---|
+| Prototype no-op | Assigning `Function.type` returns without error and changes nothing. Prototypes need `set_user_type` + `reanalyze` + `update_analysis_and_wait`. | Apply reads every write back and fails if it did not land |
+| Rename invalidates lookup | Variables are addressed by current name, so applying one rename breaks the lookup for the next claim in the same function. | Apply resolves every variable target to a concrete variable *before* the first rename |
+| Type-name clobber | `define_user_type` replaces an existing name outright. An `Elf64_Header` claim shrank the genuine 64-byte struct to 4 bytes, silently. | Apply refuses a `type_definition` whose name the database already owns |
+| Same-slot overwrite | Two claims writing one slot on one target both report as applied; the later wins. `function_comment` and `source_file` share the comment slot via `set_comment_at`. | Shape check rejects the pair and names the colliding claim |
+| Defined but unapplied | A `type_definition` with no `function_prototype`, `variable_type` or `data_type` referencing it never appears in decompiled output. | The report states types defined versus types applied, and says so when the count is zero |
+
+### Superseding a claim
+
+A claim already carrying a verdict cannot be edited — the verdict adjudicates specific evidence text, and rewriting the text underneath it would leave the record asserting that something was reviewed which never was. To replace one, propose a new claim naming the old:
+
+```json
+{"claim_id":"fn_6891c0_cmt_v2","kind":"function_comment","target":"0x6891c0","supersedes":"fn_6891c0_cmt","proposed_value":"…","confidence":"high","evidence":["…"],"status":"proposed"}
+```
+
+`supersedes` names a prior `claim_id` in the same file, of the same kind, which already has a verdict row. The pair is then exempt from the same-slot collision error, so a comment can be extended or a wrong evidence item corrected without the shape check blocking it.
+
+Resolution is by verdict, at apply time:
+
+| Superseding claim | Result |
+|---|---|
+| accepted | it applies; the superseded claim is retired and does not apply |
+| rejected | it does not apply; the superseded claim stands |
+| unreviewed | neither is retired yet; the collision stays exempt while it awaits a verdict |
+
+Two rules follow from this and both are enforced:
+
+- **A corrected claim does not inherit its old verdict.** If you instead rewrite a claim's evidence in place, withdraw its verdict row and send it back to the validator. Keep the superseded verdict on record — a backup of `verdicts.jsonl` is the minimum — so the audit trail still shows what was ruled on and when.
+- One claim may not be superseded by two claims, and a claim may not supersede itself. Both are ambiguous about which text was actually adjudicated.
 
 ## Naming
 
-`snake_case`, every renamed symbol prefixed `mw_`. Categories:
+`snake_case` everywhere. **Only functions carry the `mw_` prefix.**
+
+The prefix answers one question: which functions did the analyst curate, in a binary that may hold thousands of stock ones. That question only applies to the global function namespace. Variables are function-scoped and types are read in context, so they take the plain recovered name — `cfg`, `key_len`, `c2_config`, `command_entry`. Prefixing them only makes decompiled output harder to read, and `validate-claims` rejects an `mw_` prefix on a variable or data name.
+
+Function categories:
 
 | Category | Pattern | Example |
 |---|---|---|
@@ -145,7 +244,29 @@ Kinds: `function_name`, `function_comment`, `data_name`, `type_definition`, `sou
 | Strings | `mw_str_<action>` | `mw_str_deobfuscate` |
 | Init | `mw_init_<what>` | `mw_init_comms` |
 
-Variables: `mw_buf_<purpose>`, `mw_h_<target>`, `mw_<what>_size`. Data: `mw_encrypted_strings_blob`, `mw_c2_config_block`.
+Variables (`variable_name` claims), data (`data_name`) and types (`type_definition`) take the plain descriptive name, no prefix:
+
+| What | Pattern | Example |
+|---|---|---|
+| Buffer | `buf_<purpose>` or the role | `buf_c2_response`, `plaintext` |
+| Handle | `h_<target>` | `h_process`, `h_reg_key` |
+| Size / count | `<what>_len`, `<what>_count` | `key_len`, `entry_count` |
+| Data blob | descriptive | `encrypted_strings_blob`, `c2_config_block` |
+| Type | descriptive | `struct c2_config`, `struct command_entry` |
+
+`validate-claims` enforces snake_case, the no-`_likely` rule and C-identifier validity on all three name kinds; the `mw_` prefix is required on `function_name` and rejected on the others. A convention slip is a shape error, not a validator judgement call.
+
+Because recovered type names carry no prefix, they share a namespace with platform and format types (`Elf64_Header`, `__kernel_long_t`, libc typedefs). Reusing one of those names would silently replace the real definition, so `bn_apply_claims.py` refuses a `type_definition` whose name the database already owns. Pick a distinct name.
+
+### Recovered upstream names
+
+`mw_` marks an actor-authored function. When you recover a function's **genuine** upstream name from the binary's own metadata — a Go `pclntab` entry, a `FuncID`, DWARF, a symbol table — prefixing it would falsely attribute stock runtime or library code to the actor. Declare it instead:
+
+```json
+{"claim_id":"fn_437680_name","kind":"function_name","target":"0x437680","proposed_value":"runtime_main","name_source":"recovered","confidence":"high","evidence":["pclntab records func_id 18, which is FuncID_runtime_main in the Go 1.23/1.24 abi.FuncID enum","pclntab attributes 0x437680 to proc.go"],"status":"proposed"}
+```
+
+`name_source` is `authored` (the default — requires the `mw_` prefix) or `recovered` (must **not** carry the prefix, and the evidence must cite the symbol source). It applies to `function_name` only, since no other kind is prefixed. This is the one sanctioned way to name a function without `mw_`; do not use it to smuggle a guessed name past the prefix rule.
 
 **No `_likely` suffix.** Uncertainty lives in `claim.status` and the validator's `needs_human` verdict, not in the symbol name. A name is either supported by evidence and applied, or it is not applied.
 
@@ -162,6 +283,26 @@ These prioritise work but never back a claim on their own:
 - Analyst intuition
 
 `type_definition` claims need offset/size/access evidence, allocation size, ABI/API signatures, or consistent data flow. `source_file` claims need clusters — call relationships, shared state or types, common API families, protocol boundaries.
+
+Type-application claims need evidence tying the type to *that* storage location:
+- `variable_type` — the accesses through the variable: offsets read or written, the width of each access, the allocation size it came from, or the signature of the callee it is passed to.
+- `function_prototype` — per-parameter evidence. Register/stack position plus how each argument is used. Enumerate **every** call site, not a sample of them: a partial enumeration has twice produced a wrong parameter reading in this pipeline, once from the analyst and once from the validator, each having sampled four of nine sites. Get the full xref set. A parameter typed on one call site alone is a `needs_human`, not an accept.
+- `data_type` — the access pattern at that address, its size, and the routines that read it.
+
+"It is passed to something that looks like a parser" types nothing. Cite the offsets.
+
+Check offset arithmetic against the **pointee width**, not the index. `&rax[2]` on an `int128_t*` is `+0x20`; reading it as `+0x10` produces a claim whose evidence contradicts the very type it cites. Recompute any cited magic constant rather than asserting it — a division-by-100 reciprocal is checkable in one line.
+
+### Naming evidence
+
+A `variable_name` needs support from **that variable's own reads and writes**. Two sources that look like evidence and are not:
+
+- **The enclosing function's name.** Being inside `mw_c2_send_beacon` is not evidence that `var_70` holds the beacon buffer.
+- **A callee's accepted claim.** An accepted name elsewhere cannot manufacture dataflow. "It comes out of `mw_config_decrypt_and_parse`, so it is the config" is an argument about the callee, not about this variable — and if the variable is a convention artifact the callee never returned into, the claim is naming something that does not exist.
+
+Before naming any register-backed variable, confirm the register is actually dereferenced or stored in this function, and count its real uses. A variable redefined by every call and never read on its own account is a Binary Ninja clobber artifact. Leave it unnamed.
+
+Leaving a parameter unnamed is a legitimate result. Where the sole caller never sets it, say so in a `function_comment` and move on.
 
 ## Workspace
 
@@ -197,6 +338,8 @@ Do not use unrelated project directories as fixtures or prior art unless the use
 Normalise evidence so claim and validation logic is shared across both.
 
 ## Go ELF Handling
+
+**Read `references/go-abi.md` before claiming any argument, variable or structure in a Go binary.** It covers the goroutine pointer in `r14` and how to pin the `runtime.g` layout from the binary rather than from convention, the real argument-register order and why Binary Ninja's `argN` indices do not follow it, how a `[]byte` occupies three slots so a capacity register distinguishes a whole array from a subslice, what pclntab can and cannot be quoted for, and the phantom parameters and variables that must not be named.
 
 When `file` or Binary Ninja indicates Go:
 - DWARF line paths and Go symbols are primary evidence for source-tree recovery.
